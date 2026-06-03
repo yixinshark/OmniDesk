@@ -1,8 +1,1 @@
-{
-  "id": "pomodoro",
-  "name": "番茄钟",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["2x2"],
-  "defaultSize": "2x2"
-}
+{"id":"pomodoro","name":"番茄钟","description":"专注工作计时器","width":2,"height":2,"icon":"🍅"}

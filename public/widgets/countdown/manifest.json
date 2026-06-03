@@ -1,8 +1,1 @@
-{
-  "id": "countdown",
-  "name": "倒数日",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["2x2"],
-  "defaultSize": "2x2"
-}
+{"id":"countdown","name":"倒数日","description":"重要日期倒计时","width":2,"height":2,"icon":"⏰"}

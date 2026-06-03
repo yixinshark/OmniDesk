@@ -1,8 +1,1 @@
-{
-  "id": "github-monitor",
-  "name": "PR 监控",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["4x4"],
-  "defaultSize": "4x4"
-}
+{"id":"github-monitor","name":"GitHub PR 监控","description":"多仓库 PR 轮播，支持需 Review / 我提交的 列表","width":4,"height":4,"icon":"🐙"}

@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+:root {
+  --glass-blur: 30px;
+}
+
 @theme {
   --color-glass-bg: rgba(255, 255, 255, 0.1);
   --color-glass-border: rgba(255, 255, 255, 0.2);
@@ -7,7 +11,9 @@
 
 @layer utilities {
   .glass {
-    @apply bg-glass-bg backdrop-blur-2xl border border-glass-border shadow-2xl;
+    @apply bg-glass-bg border border-glass-border shadow-2xl;
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
   }
 }
 
@@ -16,7 +22,6 @@ html, body, #root {
 }
 
 body {
-  /* 默认降级壁纸 */
   background: linear-gradient(135deg, #1e1e2f 0%, #2a2a4a 100%);
   background-size: cover;
   background-position: center;

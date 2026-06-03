@@ -1,0 +1,8 @@
+{
+  "id": "clock",
+  "name": "时钟",
+  "description": "极简数字时钟",
+  "width": 4,
+  "height": 4,
+  "icon": "🕐"
+}

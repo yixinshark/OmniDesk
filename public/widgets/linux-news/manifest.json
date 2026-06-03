@@ -1,8 +1,1 @@
-{
-  "name": "Linux News",
-  "description": "Linux Ecosystem & Qt Updates",
-  "version": "1.0.0",
-  "defaultSize": { "w": 4, "h": 4 },
-  "minSize": { "w": 3, "h": 4 },
-  "maxSize": { "w": 8, "h": 8 }
-}
+{"id":"linux-news","name":"Linux 资讯","description":"Linux 生态与 Qt 更新","width":4,"height":4,"icon":"🐧"}

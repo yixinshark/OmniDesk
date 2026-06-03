@@ -1,8 +1,1 @@
-{
-  "id": "weather",
-  "name": "天气预报",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["2x2"],
-  "defaultSize": "2x2"
-}
+{"id":"weather","name":"天气预报","description":"实时天气信息","width":2,"height":2,"icon":"🌤️"}

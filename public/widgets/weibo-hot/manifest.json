@@ -1,8 +1,1 @@
-{
-  "id": "weibo-hot",
-  "name": "微博热搜",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["4x4"],
-  "defaultSize": "4x4"
-}
+{"id":"weibo-hot","name":"微博热搜","description":"微博实时热搜榜","width":4,"height":4,"icon":"🔥"}

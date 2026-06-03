@@ -1,8 +1,1 @@
-{
-  "id": "todo",
-  "name": "便签",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["2x2", "2x3", "2x4"],
-  "defaultSize": "2x4"
-}
+{"id":"todo","name":"便签","description":"桌面待办便签","width":4,"height":4,"icon":"📝"}

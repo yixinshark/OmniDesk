@@ -1,8 +1,1 @@
-{
-  "id": "prompt",
-  "name": "每日提示词",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["2x2", "4x2"],
-  "defaultSize": "4x2"
-}
+{"id":"prompt","name":"每日提示词","description":"每日灵感提示词","width":2,"height":2,"icon":"💡"}

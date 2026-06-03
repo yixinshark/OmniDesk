@@ -6,7 +6,7 @@
   <script src="/widget-sdk.js"></script>
   <style>
     body {
-      margin: 0; padding: 16px; height: 100vh;
+      margin: 0; padding: 12px 14px; height: 100vh;
       box-sizing: border-box;
       font-family: system-ui, -apple-system, sans-serif;
       background: rgba(0, 0, 0, 0.2);
@@ -14,70 +14,81 @@
       display: flex; flex-direction: column;
       -webkit-font-smoothing: antialiased;
     }
-    .header { font-size: 0.9rem; font-weight: 600; letter-spacing: 0.5px; color: #10b981; margin-bottom: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
+    .header { font-size: 0.85rem; font-weight: 600; color: #10b981; margin-bottom: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
     .repo-selector { display: flex; align-items: center; gap: 4px; overflow: hidden; }
     .repo-nav { cursor: pointer; color: rgba(255,255,255,0.4); padding: 0 4px; user-select: none; transition: color 0.2s; }
     .repo-nav:hover { color: #10b981; }
-    .repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; color: #a7f3d0; text-align: center; }
-    .pr-count { background: rgba(16, 185, 129, 0.2); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; color: #34d399; }
-    .pr-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex-grow: 1; padding-right: 4px; }
-    .pr-list::-webkit-scrollbar { width: 4px; }
-    .pr-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-    .pr-item {
-      background: rgba(255,255,255,0.06);
-      padding: 12px 14px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: all 0.2s;
-      border-left: 3px solid transparent;
-    }
+    .repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; color: #a7f3d0; text-align: center; font-size: 0.8rem; }
+    .pr-count { background: rgba(16, 185, 129, 0.2); padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; color: #34d399; }
+    .btn-settings { cursor: pointer; color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-left: 6px; transition: color 0.2s; }
+    .btn-settings:hover { color: #fff; }
+    .btn-refresh { cursor: pointer; padding: 0; margin-left: 4px; display: flex; align-items: center; transition: all 0.2s; }
+    .btn-refresh svg { width: 13px; height: 13px; }
+    .btn-refresh:hover { transform: rotate(90deg); }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .tabs { display: flex; gap: 2px; margin-bottom: 8px; flex-shrink: 0; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 2px; }
+    .tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 6px; font-size: 0.7rem; font-weight: 600; cursor: pointer; color: rgba(255,255,255,0.45); transition: all 0.2s; user-select: none; }
+    .tab:hover { color: rgba(255,255,255,0.7); }
+    .tab.active { background: rgba(16, 185, 129, 0.25); color: #34d399; }
+    .pr-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex-grow: 1; padding-right: 4px; }
+    .pr-list::-webkit-scrollbar { width: 3px; }
+    .pr-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    .pr-item { background: rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent; }
     .pr-item:hover { background: rgba(255,255,255,0.12); border-left-color: #10b981; transform: translateX(2px); }
-    .pr-title { font-size: 0.9rem; font-weight: 500; letter-spacing: 0.3px; line-height: 1.4; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .pr-number { color: #60a5fa; margin-right: 6px; }
-    .pr-status-badge { font-size: 0.65rem; height: 16px; line-height: 14px; padding: 0 6px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; box-sizing: border-box; }
+    .pr-title { font-size: 0.8rem; font-weight: 500; line-height: 1.3; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .pr-number { color: #60a5fa; margin-right: 5px; }
+    .pr-status-badge { font-size: 0.6rem; height: 15px; line-height: 13px; padding: 0 5px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; box-sizing: border-box; }
     .status-approved { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }
     .status-changes { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); }
     .status-review { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); }
     .status-draft { background: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.4); }
     .status-open { background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.4); }
-    .pr-meta { font-size: 0.75rem; color: rgba(255,255,255,0.5); display: flex; justify-content: space-between; align-items: center; }
-    .pr-author { font-weight: 500; color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 6px; }
-    .avatar { width: 16px; height: 16px; border-radius: 50%; }
-    .labels { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-    .label { font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 600; color: #fff; }
-    .status { font-size: 0.75rem; color: rgba(255,255,255,0.4); text-align: center; margin-top: 10px; flex-shrink: 0; }
-    .icon { margin-right: 6px; font-weight: bold; font-size: 1.1rem; }
-    .btn-settings { cursor: pointer; color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-left: 8px; transition: color 0.2s; }
-    .btn-settings:hover { color: #fff; }
-    
-    /* Config Panel */
-    .config-panel { display: none; flex-direction: column; gap: 12px; height: 100%; }
+    .pr-meta { font-size: 0.7rem; color: rgba(255,255,255,0.5); display: flex; justify-content: space-between; align-items: center; }
+    .pr-author { font-weight: 500; color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 5px; }
+    .avatar { width: 14px; height: 14px; border-radius: 50%; }
+    .labels { display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 5px; }
+    .label { font-size: 0.6rem; padding: 1px 5px; border-radius: 10px; font-weight: 600; color: #fff; }
+    .status { font-size: 0.7rem; color: rgba(255,255,255,0.4); text-align: center; margin-top: 10px; flex-shrink: 0; }
+    .repo-badge { font-size: 0.55rem; padding: 1px 6px; border-radius: 8px; background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-weight: 600; margin-bottom: 4px; display: inline-block; }
+    .config-panel { display: none; flex-direction: column; gap: 10px; height: 100%; }
     .config-panel.active { display: flex; }
-    .input-row { display: flex; gap: 6px; }
-    .input-field { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; outline: none; }
+    .input-row { display: flex; gap: 5px; }
+    .input-field { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 5px 8px; border-radius: 6px; font-size: 0.75rem; outline: none; }
     .input-field:focus { border-color: #10b981; }
-    .btn-save { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .btn-save { background: #10b981; color: white; border: none; padding: 5px 10px; border-radius: 6px; font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 0.75rem; }
     .btn-save:hover { background: #059669; }
-    .repo-list-mgr { flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-    .repo-mgr-item { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; }
-    .btn-del { color: #ef4444; cursor: pointer; font-weight: bold; padding: 0 4px; }
+    .repo-list-mgr { flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    .repo-mgr-item { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 5px 8px; border-radius: 6px; font-size: 0.75rem; }
+    .btn-del { color: #ef4444; cursor: pointer; font-weight: bold; padding: 0 3px; }
     .btn-del:hover { color: #f87171; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+    .toggle-label { font-size: 0.7rem; color: rgba(255,255,255,0.6); }
+    .toggle { position: relative; width: 32px; height: 18px; background: rgba(255,255,255,0.15); border-radius: 9px; cursor: pointer; transition: background 0.2s; }
+    .toggle.on { background: #10b981; }
+    .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: white; border-radius: 50%; transition: transform 0.2s; }
+    .toggle.on::after { transform: translateX(14px); }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="repo-selector">
-      <span class="icon">⑃</span>
       <span class="repo-nav" onclick="prevRepo()" id="nav-prev">◀</span>
       <span class="repo-name" id="repo-title">Loading...</span>
       <span class="repo-nav" onclick="nextRepo()" id="nav-next">▶</span>
+      <span class="btn-refresh" id="btn-refresh" onclick="manualRefresh()" title="刷新"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg></span>
       <span class="btn-settings" onclick="toggleConfig()">⚙️</span>
     </div>
     <span class="pr-count" id="pr-count">--</span>
   </div>
 
+  <div class="tabs" id="tabs-bar">
+    <div class="tab active" data-tab="all" onclick="switchTab('all')">All Open</div>
+    <div class="tab" data-tab="review" onclick="switchTab('review')">需 Review</div>
+    <div class="tab" data-tab="mine" onclick="switchTab('mine')">我提交的</div>
+  </div>
+
   <div class="config-panel" id="config-panel">
-    <div style="font-size:0.8rem; font-weight:bold; display: flex; justify-content: space-between;">
+    <div style="font-size:0.75rem; font-weight:bold; display: flex; justify-content: space-between;">
       <span>管理监控仓库</span>
       <span class="btn-settings" onclick="toggleConfig()">关闭</span>
     </div>
@@ -85,27 +96,40 @@
       <input type="text" id="repo-input" class="input-field" placeholder="Owner/Repo" onkeydown="if(event.key === 'Enter') addRepo()" />
       <button class="btn-save" onclick="addRepo()">添加</button>
     </div>
-    <div class="input-row" style="margin-top: -4px;">
-      <input type="password" id="token-input" class="input-field" placeholder="GitHub Token (可选,防限流)" onkeydown="if(event.key === 'Enter') saveToken()" />
-      <button class="btn-save" onclick="saveToken()">保存 Token</button>
+    <div class="input-row" style="margin-top:-2px;">
+      <input type="password" id="token-input" class="input-field" placeholder="GitHub Token (必填,用于识别身份)" onkeydown="if(event.key === 'Enter') saveToken()" />
+      <button class="btn-save" onclick="saveToken()">保存</button>
+    </div>
+    <div class="input-row" style="margin-top:-2px;">
+      <input type="text" id="username-input" class="input-field" placeholder="GitHub 用户名 (可选,自动获取)" onkeydown="if(event.key === 'Enter') saveUsername()" />
+      <button class="btn-save" onclick="saveUsername()">保存</button>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">合并显示所有仓库（不分项目）</span>
+      <div class="toggle" id="flat-toggle" onclick="toggleFlatMode()"></div>
     </div>
     <div class="repo-list-mgr" id="repo-list-mgr"></div>
   </div>
 
   <div class="pr-list" id="pr-list">
-    <div class="status" style="margin-top:40px;">Fetching Pull Requests...</div>
+    <div class="status" style="margin-top:30px;">Fetching Pull Requests...</div>
   </div>
-  <div class="status" id="last-update" style="margin-top:auto;">Updated --:--</div>
+  <div class="status" id="last-update" style="margin-top:auto; font-size:0.65rem;">Updated --:--</div>
 
   <script>
     let repos = ['linuxdeepin/dde-control-center'];
     let currentIdx = 0;
     let githubToken = '';
-    
+    let username = '';
+    let currentTab = 'all';
+    let flatMode = false;
+    let allPRs = [];
+    let allReviews = {};
+
     const urlParams = new URLSearchParams(window.location.search);
     const instanceId = urlParams.get('instanceId') || 'github_default';
     const configFilename = `${instanceId}_config.json`;
-    
+
     function timeAgo(dateString) {
       const date = new Date(dateString);
       const seconds = Math.floor((new Date() - date) / 1000);
@@ -118,140 +142,208 @@
       return "just now";
     }
 
-    function getContrastYIQ(hexcolor){
-      const r = parseInt(hexcolor.substring(0,2),16);
-      const g = parseInt(hexcolor.substring(2,4),16);
-      const b = parseInt(hexcolor.substring(4,6),16);
-      const yiq = ((r*299)+(g*587)+(b*114))/1000;
-      return (yiq >= 128) ? 'black' : 'white';
+    function getContrastYIQ(hexcolor) {
+      const r = parseInt(hexcolor.substring(0, 2), 16);
+      const g = parseInt(hexcolor.substring(2, 4), 16);
+      const b = parseInt(hexcolor.substring(4, 6), 16);
+      return ((r * 299) + (g * 587) + (b * 114)) / 1000 >= 128 ? 'black' : 'white';
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+      renderCurrentTab();
+    }
+
+    function toggleFlatMode() {
+      flatMode = !flatMode;
+      document.getElementById('flat-toggle').classList.toggle('on', flatMode);
+      updateRepoNav();
+      saveConfigSilent();
+      fetchPRs();
+    }
+
+    function updateRepoNav() {
+      const nav = document.getElementById('nav-prev');
+      const nav2 = document.getElementById('nav-next');
+      const title = document.getElementById('repo-title');
+      if (flatMode) {
+        nav.style.display = 'none';
+        nav2.style.display = 'none';
+        title.innerText = '全部仓库';
+        title.style.color = '#60a5fa';
+      } else {
+        nav.style.display = '';
+        nav2.style.display = '';
+        title.style.color = '';
+        title.innerText = repos.length > 0 ? (repos[currentIdx].split('/').pop() || repos[currentIdx]) : '未配置';
+      }
+    }
+
+    function getFilteredPRs() {
+      let prs = allPRs;
+      if (currentTab === 'review') {
+        prs = prs.filter(pr => pr.requested_reviewers && pr.requested_reviewers.some(r => r.login === username));
+      } else if (currentTab === 'mine') {
+        prs = prs.filter(pr => pr.user && pr.user.login === username);
+      }
+      return prs;
+    }
+
+    function renderCurrentTab() {
+      const filtered = getFilteredPRs();
+      const listEl = document.getElementById('pr-list');
+      const countEl = document.getElementById('pr-count');
+
+      if (currentTab === 'review') countEl.innerText = filtered.length + ' 待 Review';
+      else if (currentTab === 'mine') countEl.innerText = filtered.length + ' 我的';
+      else countEl.innerText = filtered.length + (allPRs.length >= 30 ? '+' : '');
+
+      if (!username && (currentTab === 'review' || currentTab === 'mine')) {
+        listEl.innerHTML = '<div class="status" style="margin-top:30px; line-height:1.6;">请先在 ⚙️ 配置中设置<br>GitHub Token 和用户名</div>';
+        return;
+      }
+
+      if (filtered.length === 0) {
+        const msg = currentTab === 'review' ? '没有需要你 Review 的 PR 🎉' :
+                    currentTab === 'mine' ? '你还没有提交的 PR' : 'No pending PRs 🎉';
+        listEl.innerHTML = `<div class="status" style="margin-top:30px;">${msg}</div>`;
+        return;
+      }
+
+      listEl.innerHTML = '';
+      filtered.forEach(pr => {
+        const item = document.createElement('div');
+        item.className = 'pr-item';
+        item.onclick = () => window.__widgetBridge.invoke('open_url', { url: pr.html_url });
+
+        let statusBadge = '<span class="pr-status-badge status-open">Open</span>';
+        if (pr.draft) {
+          statusBadge = '<span class="pr-status-badge status-draft">Draft</span>';
+        } else {
+          const prReviews = allReviews[pr._repo + '#' + pr.number];
+          if (prReviews && Array.isArray(prReviews)) {
+            if (prReviews.some(r => r.state === 'CHANGES_REQUESTED')) {
+              statusBadge = '<span class="pr-status-badge status-changes">Changes Requested</span>';
+            } else if (prReviews.some(r => r.state === 'APPROVED')) {
+              statusBadge = '<span class="pr-status-badge status-approved">Approved ✓</span>';
+            } else if (pr.requested_reviewers && pr.requested_reviewers.length > 0) {
+              statusBadge = '<span class="pr-status-badge status-review">Review Requested</span>';
+            }
+          } else if (pr.requested_reviewers && pr.requested_reviewers.length > 0) {
+            statusBadge = '<span class="pr-status-badge status-review">Review Requested</span>';
+          }
+        }
+
+        const title = document.createElement('div');
+        title.className = 'pr-title';
+        title.innerHTML = `<span class="pr-number">#${pr.number}</span>${pr.title}`;
+
+        const labelsDiv = document.createElement('div');
+        labelsDiv.className = 'labels';
+        if (pr.labels && pr.labels.length > 0) {
+          pr.labels.slice(0, 3).forEach(label => {
+            const l = document.createElement('span');
+            l.className = 'label';
+            l.style.backgroundColor = `#${label.color}`;
+            l.style.color = getContrastYIQ(label.color);
+            l.innerText = label.name;
+            labelsDiv.appendChild(l);
+          });
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'pr-meta';
+        meta.innerHTML = `
+          <span class="pr-author">
+            <img class="avatar" src="${pr.user.avatar_url}" />
+            ${pr.user.login}
+          </span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${statusBadge}
+            <span>${timeAgo(pr.created_at)}</span>
+          </div>
+        `;
+
+        // flat mode 下显示仓库名
+        if (flatMode && pr._repo) {
+          const badge = document.createElement('div');
+          badge.className = 'repo-badge';
+          badge.innerText = pr._repo;
+          item.appendChild(badge);
+        }
+
+        item.appendChild(title);
+        if (pr.labels && pr.labels.length > 0) item.appendChild(labelsDiv);
+        item.appendChild(meta);
+        listEl.appendChild(item);
+      });
+    }
+
+    async function fetchUsername() {
+      if (!githubToken || username) return;
+      try {
+        const res = await window.__widgetBridge.invoke('fetch_proxy', { url: 'https://api.github.com/user', token: githubToken });
+        const data = JSON.parse(res);
+        if (data.login) { username = data.login; document.getElementById('username-input').value = username; saveConfigSilent(); }
+      } catch (e) { console.warn('Failed to fetch GitHub username:', e); }
     }
 
     async function fetchPRs() {
       if (repos.length === 0) {
         document.getElementById('repo-title').innerText = '未配置仓库';
-        document.getElementById('pr-list').innerHTML = '<div class="status" style="margin-top:40px;">请点击⚙️添加监控仓库</div>';
-        document.getElementById('pr-count').innerText = '0 Open';
+        document.getElementById('pr-list').innerHTML = '<div class="status" style="margin-top:30px;">请点击⚙️添加监控仓库</div>';
+        document.getElementById('pr-count').innerText = '0';
         return;
       }
-      
-      const currentRepo = repos[currentIdx];
-      document.getElementById('repo-title').innerText = currentRepo.split('/').pop() || currentRepo;
-      
-      document.getElementById('nav-prev').style.visibility = repos.length > 1 ? 'visible' : 'hidden';
-      document.getElementById('nav-next').style.visibility = repos.length > 1 ? 'visible' : 'hidden';
 
-      const listEl = document.getElementById('pr-list');
+      updateRepoNav();
+      document.getElementById('nav-prev').style.visibility = (!flatMode && repos.length > 1) ? 'visible' : 'hidden';
+      document.getElementById('nav-next').style.visibility = (!flatMode && repos.length > 1) ? 'visible' : 'hidden';
+
       try {
-        // 请求参数改为 sort=created 保证最新的 PR 优先展示
-        const res = await window.__widgetBridge.invoke('fetch_proxy', { 
-          url: `https://api.github.com/repos/${currentRepo}/pulls?state=open&sort=created&direction=desc&per_page=10`,
-          token: githubToken || null
-        });
-        const prs = JSON.parse(res);
-        
-        if (!Array.isArray(prs)) {
-          if (prs.message) throw new Error(prs.message);
-          throw new Error('Invalid data');
+        const reposToFetch = flatMode ? repos : [repos[currentIdx]];
+        const allResults = [];
+
+        for (const repo of reposToFetch) {
+          try {
+            const res = await window.__widgetBridge.invoke('fetch_proxy', {
+              url: `https://api.github.com/repos/${repo}/pulls?state=open&sort=created&direction=desc&per_page=15`,
+              token: githubToken || null
+            });
+            const prs = JSON.parse(res);
+            if (Array.isArray(prs)) {
+              prs.forEach(pr => { pr._repo = repo; });
+              allResults.push(...prs);
+            }
+          } catch (e) { console.warn(`Failed to fetch ${repo}:`, e); }
         }
 
-        document.getElementById('pr-count').innerText = prs.length + (prs.length === 10 ? '+' : ' Open');
-        
-        listEl.innerHTML = '';
-        if (prs.length === 0) {
-          listEl.innerHTML = '<div class="status" style="margin-top:40px;">No pending PRs 🎉</div>';
-        } else {
-          // Fetch review status for all displayed PRs in parallel (only if token is present to avoid rapid rate limits)
-          const reviewPromises = prs.map(pr => {
-             if (!githubToken) return Promise.resolve(null);
-             return window.__widgetBridge.invoke('fetch_proxy', { 
-               url: `https://api.github.com/repos/${currentRepo}/pulls/${pr.number}/reviews?per_page=100`,
-               token: githubToken
-             }).then(r => JSON.parse(r)).catch(() => null);
-          });
-          
-          const reviewsData = await Promise.all(reviewPromises);
+        // Sort by created_at descending
+        allResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        allPRs = allResults;
+        allReviews = {};
 
-          prs.forEach((pr, idx) => {
-            const item = document.createElement('div');
-            item.className = 'pr-item';
-            item.onclick = () => window.__widgetBridge.invoke('open_url', { url: pr.html_url });
-            
-            // Determine PR Status
-            let statusBadge = '<span class="pr-status-badge status-open">Open</span>';
-            if (pr.draft) {
-                statusBadge = '<span class="pr-status-badge status-draft">Draft</span>';
-            } else {
-                const prReviews = reviewsData[idx];
-                if (prReviews && Array.isArray(prReviews)) {
-                    const approved = prReviews.some(r => r.state === 'APPROVED');
-                    const changesRequested = prReviews.some(r => r.state === 'CHANGES_REQUESTED');
-                    if (changesRequested) {
-                        statusBadge = '<span class="pr-status-badge status-changes">Changes Requested</span>';
-                    } else if (approved) {
-                        statusBadge = '<span class="pr-status-badge status-approved">Approved ✓</span>';
-                    } else if (pr.requested_reviewers && pr.requested_reviewers.length > 0) {
-                        statusBadge = '<span class="pr-status-badge status-review">Review Requested</span>';
-                    }
-                } else {
-                    // Fallback if no token or review fetch failed
-                    if (pr.requested_reviewers && pr.requested_reviewers.length > 0) {
-                        statusBadge = '<span class="pr-status-badge status-review">Review Requested</span>';
-                    }
-                }
-            }
-
-            const title = document.createElement('div');
-            title.className = 'pr-title';
-            title.innerHTML = `<span class="pr-number">#${pr.number}</span>${pr.title}`;
-            
-            const labelsDiv = document.createElement('div');
-            labelsDiv.className = 'labels';
-            if (pr.labels && pr.labels.length > 0) {
-                pr.labels.slice(0, 3).forEach(label => {
-                    const l = document.createElement('span');
-                    l.className = 'label';
-                    l.style.backgroundColor = `#${label.color}`;
-                    l.style.color = getContrastYIQ(label.color);
-                    l.innerText = label.name;
-                    labelsDiv.appendChild(l);
-                });
-            }
-
-            const meta = document.createElement('div');
-            meta.className = 'pr-meta';
-            meta.innerHTML = `
-              <span class="pr-author">
-                <img class="avatar" src="${pr.user.avatar_url}" />
-                ${pr.user.login}
-              </span>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                ${statusBadge}
-                <span>${timeAgo(pr.created_at)}</span>
-              </div>
-            `;
-            
-            item.appendChild(title);
-            if (pr.labels && pr.labels.length > 0) item.appendChild(labelsDiv);
-            item.appendChild(meta);
-            listEl.appendChild(item);
-          });
+        if (githubToken) {
+          const reviewPromises = allPRs.map(pr =>
+            window.__widgetBridge.invoke('fetch_proxy', {
+              url: `https://api.github.com/repos/${pr._repo}/pulls/${pr.number}/reviews?per_page=100`,
+              token: githubToken
+            }).then(r => { allReviews[pr._repo + '#' + pr.number] = JSON.parse(r); }).catch(() => {})
+          );
+          await Promise.all(reviewPromises);
         }
-        
+
+        renderCurrentTab();
         const now = new Date();
-        document.getElementById('last-update').innerText = `Updated ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+        document.getElementById('last-update').innerText = `Updated ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       } catch (e) {
         let msg = e.message || String(e);
+        const listEl = document.getElementById('pr-list');
         if (msg.toLowerCase().includes("rate limit")) {
-          listEl.innerHTML = `
-            <div class="status" style="color:#ef4444; margin-top:30px; line-height: 1.6;">
-              <div style="font-weight:bold; margin-bottom:8px;">⚠️ 请求已达公共接口上限</div>
-              <span style="color:#34d399; cursor:pointer; text-decoration:underline;" onclick="toggleConfig()">
-                点击此处配置 GitHub Token 解除限制
-              </span>
-            </div>
-          `;
+          listEl.innerHTML = '<div class="status" style="color:#ef4444; margin-top:20px; line-height:1.6;"><div style="font-weight:bold;margin-bottom:6px;">⚠️ 请求已达公共接口上限</div><span style="color:#34d399;cursor:pointer;text-decoration:underline;" onclick="toggleConfig()">点击此处配置 GitHub Token 解除限制</span></div>';
         } else {
-          listEl.innerHTML = `<div class="status" style="color:#ef4444; margin-top:40px;">获取失败: ${msg}</div>`;
+          listEl.innerHTML = `<div class="status" style="color:#ef4444; margin-top:30px;">获取失败: ${msg}</div>`;
         }
       }
     }
@@ -261,64 +353,32 @@
         const data = await window.__widgetBridge.invoke('widget_read_file', { filename: configFilename });
         if (data) {
           const cfg = JSON.parse(data);
-          if (cfg.repos && Array.isArray(cfg.repos)) {
-            repos = cfg.repos;
-            currentIdx = cfg.currentIdx !== undefined ? cfg.currentIdx : 0;
-            if (currentIdx >= repos.length) currentIdx = 0;
-          }
-          if (cfg.token) {
-            githubToken = cfg.token;
-            document.getElementById('token-input').value = githubToken;
-          }
+          if (cfg.repos && Array.isArray(cfg.repos)) { repos = cfg.repos; currentIdx = cfg.currentIdx || 0; if (currentIdx >= repos.length) currentIdx = 0; }
+          if (cfg.token) { githubToken = cfg.token; document.getElementById('token-input').value = githubToken; }
+          if (cfg.username) { username = cfg.username; document.getElementById('username-input').value = username; }
+          if (cfg.flatMode) { flatMode = true; document.getElementById('flat-toggle').classList.add('on'); }
         }
       } catch (e) {}
+      if (githubToken && !username) await fetchUsername();
+      updateRepoNav();
       fetchPRs();
     }
 
     async function saveConfig() {
-      await window.__widgetBridge.invoke('widget_write_file', { 
-        filename: configFilename, 
-        content: JSON.stringify({ repos, currentIdx, token: githubToken }) 
-      });
+      await window.__widgetBridge.invoke('widget_write_file', { filename: configFilename, content: JSON.stringify({ repos, currentIdx, token: githubToken, username, flatMode }) });
       fetchPRs();
     }
 
-    function saveToken() {
-      const val = document.getElementById('token-input').value.trim();
-      githubToken = val;
-      saveConfig();
-      // 如果之前是因为限流报错，保存 Token 后立刻清空状态重新拉取
-      document.getElementById('pr-list').innerHTML = '<div class="status" style="margin-top:40px;">Fetching Pull Requests...</div>';
+    async function saveConfigSilent() {
+      await window.__widgetBridge.invoke('widget_write_file', { filename: configFilename, content: JSON.stringify({ repos, currentIdx, token: githubToken, username, flatMode }) });
     }
 
-    function addRepo() {
-      const newVal = document.getElementById('repo-input').value.trim();
-      if (newVal && !repos.includes(newVal)) {
-        repos.push(newVal);
-        document.getElementById('repo-input').value = '';
-        renderConfigMgr();
-        saveConfig();
-      }
-    }
-
-    function removeRepo(idx) {
-      repos.splice(idx, 1);
-      if (currentIdx >= repos.length) currentIdx = Math.max(0, repos.length - 1);
-      renderConfigMgr();
-      saveConfig();
-    }
-
-    function prevRepo() {
-      if (repos.length <= 1) return;
-      currentIdx = (currentIdx - 1 + repos.length) % repos.length;
-      saveConfig();
-    }
-
-    function nextRepo() {
-      if (repos.length <= 1) return;
-      currentIdx = (currentIdx + 1) % repos.length;
-      saveConfig();
-    }
+    function saveToken() { githubToken = document.getElementById('token-input').value.trim(); if (githubToken && !username) fetchUsername().then(() => saveConfig()); else saveConfig(); }
+    function saveUsername() { username = document.getElementById('username-input').value.trim(); saveConfig(); }
+    function addRepo() { const v = document.getElementById('repo-input').value.trim(); if (v && !repos.includes(v)) { repos.push(v); document.getElementById('repo-input').value = ''; renderConfigMgr(); saveConfig(); } }
+    function removeRepo(idx) { repos.splice(idx, 1); if (currentIdx >= repos.length) currentIdx = Math.max(0, repos.length - 1); renderConfigMgr(); saveConfig(); }
+    function prevRepo() { if (repos.length <= 1 || flatMode) return; currentIdx = (currentIdx - 1 + repos.length) % repos.length; saveConfig(); }
+    function nextRepo() { if (repos.length <= 1 || flatMode) return; currentIdx = (currentIdx + 1) % repos.length; saveConfig(); }
 
     function renderConfigMgr() {
       const mgr = document.getElementById('repo-list-mgr');
@@ -333,17 +393,26 @@
 
     function toggleConfig() {
       const panel = document.getElementById('config-panel');
+      const tabs = document.getElementById('tabs-bar');
       const list = document.getElementById('pr-list');
+      const footer = document.getElementById('last-update');
       if (panel.classList.contains('active')) {
         panel.classList.remove('active');
-        list.style.display = 'flex';
-        document.getElementById('last-update').style.display = 'block';
+        tabs.style.display = 'flex'; list.style.display = 'flex'; footer.style.display = 'block';
       } else {
         panel.classList.add('active');
-        list.style.display = 'none';
-        document.getElementById('last-update').style.display = 'none';
+        tabs.style.display = 'none'; list.style.display = 'none'; footer.style.display = 'none';
         renderConfigMgr();
       }
+    }
+
+    function manualRefresh() {
+      const btn = document.getElementById('btn-refresh');
+      btn.style.animation = 'spin 0.8s linear';
+      btn.style.pointerEvents = 'none';
+      fetchPRs().finally(() => {
+        setTimeout(() => { btn.style.animation = ''; btn.style.pointerEvents = ''; }, 800);
+      });
     }
 
     loadConfig();

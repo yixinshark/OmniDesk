@@ -78,6 +78,8 @@
     .fill { stroke-linecap: round; stroke-dasharray: 201; stroke-dashoffset: 201; transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
     .cpu-fill { stroke: url(#cpuGrad); }
     .mem-fill { stroke: url(#memGrad); }
+    .swap-fill { stroke: url(#swapGrad); }
+    .temp-fill { stroke: url(#tempGrad); }
     .gauge-info {
       position: absolute; inset: 0;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -145,6 +147,16 @@
       <span class="dim-label">内存使用率</span>
     </label>
     <label class="config-row">
+      <input type="checkbox" id="cfg-swap" onchange="saveMonitorConfig()">
+      <span class="dim-icon">🔄</span>
+      <span class="dim-label">Swap 占用</span>
+    </label>
+    <label class="config-row">
+      <input type="checkbox" id="cfg-temp" onchange="saveMonitorConfig()">
+      <span class="dim-icon">🌡️</span>
+      <span class="dim-label">CPU 温度</span>
+    </label>
+    <label class="config-row">
       <input type="checkbox" id="cfg-network" onchange="saveMonitorConfig()">
       <span class="dim-icon">🌐</span>
       <span class="dim-label">网络速率</span>
@@ -179,6 +191,20 @@
         </svg>
         <div class="gauge-info"><span class="gauge-val" id="mem-text">--%</span><span class="gauge-label">RAM</span></div>
       </div>
+      <div class="gauge-container">
+        <svg viewBox="0 0 80 80" class="gauge">
+          <defs><linearGradient id="swapGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
+          <circle class="bg" cx="40" cy="40" r="32"/><circle class="fill swap-fill" cx="40" cy="40" r="32" id="swap-ring"/>
+        </svg>
+        <div class="gauge-info"><span class="gauge-val" id="swap-text">--%</span><span class="gauge-label">SWAP</span></div>
+      </div>
+      <div class="gauge-container">
+        <svg viewBox="0 0 80 80" class="gauge">
+          <defs><linearGradient id="tempGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#ef4444"/></linearGradient></defs>
+          <circle class="bg" cx="40" cy="40" r="32"/><circle class="fill temp-fill" cx="40" cy="40" r="32" id="temp-ring"/>
+        </svg>
+        <div class="gauge-info"><span class="gauge-val" id="temp-text">--°</span><span class="gauge-label">TEMP</span></div>
+      </div>
     </div>
 
     <!-- Network Speed -->
@@ -198,7 +224,7 @@
     const configFilename = `monitor_${instanceId}_config.json`;
 
     // Default config
-    let monitorConfig = { showCpu: true, showRam: true, showNetwork: false, showTop: false, refreshRate: 2 };
+    let monitorConfig = { showCpu: true, showRam: true, showSwap: false, showTemp: false, showNetwork: false, showTop: false, refreshRate: 2 };
 
     function setRing(id, pct) {
       const el = document.getElementById(id);
@@ -225,18 +251,23 @@
     }
 
     function applyVisibility() {
-      document.getElementById('gauges-section').style.display = (monitorConfig.showCpu || monitorConfig.showRam) ? 'flex' : 'none';
+      const showAnyGauge = monitorConfig.showCpu || monitorConfig.showRam || monitorConfig.showSwap || monitorConfig.showTemp;
+      document.getElementById('gauges-section').style.display = showAnyGauge ? 'flex' : 'none';
       document.getElementById('network-section').style.display = monitorConfig.showNetwork ? 'flex' : 'none';
       document.getElementById('top-section').style.display = monitorConfig.showTop ? 'block' : 'none';
-      // Hide individual gauges
+      // Hide individual gauges (order: cpu, ram, swap, temp)
       const gauges = document.querySelectorAll('.gauge-container');
       if (gauges[0]) gauges[0].style.display = monitorConfig.showCpu ? 'flex' : 'none';
       if (gauges[1]) gauges[1].style.display = monitorConfig.showRam ? 'flex' : 'none';
+      if (gauges[2]) gauges[2].style.display = monitorConfig.showSwap ? 'flex' : 'none';
+      if (gauges[3]) gauges[3].style.display = monitorConfig.showTemp ? 'flex' : 'none';
     }
 
     function applyConfigToUI() {
       document.getElementById('cfg-cpu').checked = monitorConfig.showCpu;
       document.getElementById('cfg-ram').checked = monitorConfig.showRam;
+      document.getElementById('cfg-swap').checked = monitorConfig.showSwap;
+      document.getElementById('cfg-temp').checked = monitorConfig.showTemp;
       document.getElementById('cfg-network').checked = monitorConfig.showNetwork;
       document.getElementById('cfg-top').checked = monitorConfig.showTop;
       [1,2,5].forEach(r => {
@@ -260,6 +291,8 @@
     async function saveMonitorConfig() {
       monitorConfig.showCpu = document.getElementById('cfg-cpu').checked;
       monitorConfig.showRam = document.getElementById('cfg-ram').checked;
+      monitorConfig.showSwap = document.getElementById('cfg-swap').checked;
+      monitorConfig.showTemp = document.getElementById('cfg-temp').checked;
       monitorConfig.showNetwork = document.getElementById('cfg-network').checked;
       monitorConfig.showTop = document.getElementById('cfg-top').checked;
       applyVisibility();
@@ -300,6 +333,17 @@
         const mem = Math.round(data.mem_usage);
         document.getElementById('mem-text').innerText = mem + '%';
         setRing('mem-ring', mem);
+      }
+      if (monitorConfig.showSwap) {
+        const swap = Math.round(data.swap_usage || 0);
+        document.getElementById('swap-text').innerText = swap + '%';
+        setRing('swap-ring', swap);
+      }
+      if (monitorConfig.showTemp) {
+        const temp = Math.round(data.cpu_temp || 0);
+        document.getElementById('temp-text').innerText = temp + '°';
+        // 温度映射到百分比：0°C=0%, 100°C=100%
+        setRing('temp-ring', Math.min(100, temp));
       }
       if (monitorConfig.showNetwork && data.net_bytes_in !== undefined) {
         document.getElementById('net-down').innerText = fmtSpeed(data.net_bytes_in);

@@ -1,8 +1,1 @@
-{
-  "id": "ai-quota",
-  "name": "AI 额度",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["2x2"],
-  "defaultSize": "2x2"
-}
+{"id":"ai-quota","name":"AI 额度","description":"AI API 额度监控","width":2,"height":2,"icon":"💰"}

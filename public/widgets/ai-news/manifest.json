@@ -1,8 +1,1 @@
-{
-  "id": "ai-news",
-  "name": "AI 资讯",
-  "version": "1.0.0",
-  "entry": "index.html",
-  "sizes": ["4x4"],
-  "defaultSize": "4x4"
-}
+{"id":"ai-news","name":"AI 资讯","description":"实时聚合 AI 行业资讯","width":4,"height":4,"icon":"🤖"}
