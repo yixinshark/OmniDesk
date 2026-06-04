@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Grid 布局原理图解</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #1a1a1a;
+    color: #ddd;
+    padding: 24px;
+  }
+  h1 { font-size:20px; margin-bottom:8px; color:#fff; }
+  .note { font-size:13px; color:#888; margin-bottom:24px; }
+
+  .demo-area {
+    position: relative;
+    background: #0d0d0d;
+    border: 2px solid #333;
+    margin-bottom: 24px;
+    overflow: hidden;
+    /* 模拟屏幕宽度 */
+    width: 1920px;
+    transform-origin: top left;
+  }
+
+  /* p-4 padding 区域 */
+  .padding-zone {
+    position: absolute;
+    background: rgba(255, 200, 50, 0.08);
+    border: 1px dashed rgba(255, 200, 50, 0.3);
+    z-index: 1;
+  }
+  .padding-label {
+    position: absolute;
+    color: #ffc832;
+    font-size: 10px;
+    font-weight: 700;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* gap 区域 */
+  .gap-zone {
+    position: absolute;
+    background: rgba(255, 80, 80, 0.12);
+    border: 1px dashed rgba(255, 80, 80, 0.25);
+    z-index: 1;
+  }
+  .gap-label {
+    position: absolute;
+    color: #ff5050;
+    font-size: 9px;
+    font-weight: 700;
+    z-index: 2;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  /* 格子 */
+  .cell {
+    position: absolute;
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.6);
+    border-radius: 4px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: rgba(255,255,255,0.5);
+  }
+
+  /* widget 示例 */
+  .widget {
+    position: absolute;
+    background: rgba(16, 185, 129, 0.3);
+    border: 2px solid rgba(16, 185, 129, 0.8);
+    border-radius: 8px;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+
+  /* 标注线 */
+  .annot-line-h {
+    position: absolute;
+    border-top: 1px solid rgba(255,255,255,0.5);
+    z-index: 5;
+    pointer-events: none;
+  }
+  .annot-text {
+    position: absolute;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(0,0,0,0.7);
+    padding: 2px 6px;
+    border-radius: 3px;
+    z-index: 6;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 20px;
+    font-size: 13px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend-swatch {
+    width: 24px;
+    height: 16px;
+    border-radius: 3px;
+  }
+
+  .formula-box {
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .formula-box .hl { color: #60a5fa; }
+  .formula-box .hl2 { color: #f59e0b; }
+  .formula-box .hl3 { color: #ef4444; }
+
+  /* 缩放滑块 */
+  .controls {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    background: #2a2a2a;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 12px 16px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .controls input[type=range] { width: 120px; }
+</style>
+</head>
+<body>
+
+<h1>📐 OmniDesk Grid 网格布局原理</h1>
+<p class="note">假设屏幕宽度 = 1920px，使用当前参数：padding=10px，gap=10px，24列</p>
+
+<div class="controls">
+  缩放: <input type="range" id="zoom" min="20" max="100" value="50" oninput="zoomDemo(this.value)">
+  <span id="zoom-val">50%</span>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,200,50,0.3);border:1px dashed #ffc832;"></div> padding 区域 (死空间)</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,80,80,0.2);border:1px dashed #ff5050;"></div> gap 间隙 (死空间)</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:rgba(59,130,246,0.3);border:1px solid #3b82f6;"></div> 单元格 (cell)</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:rgba(16,185,129,0.4);border:2px solid #10b981;"></div> Widget 占用</div>
+</div>
+
+<div class="formula-box">
+  <strong>cellSize 计算公式：</strong><br>
+  <span class="hl">cellSize</span> = (<span class="hl2">屏幕宽度</span> − <span class="hl3">左右padding</span> − <span class="hl3">23个gap</span>) / 24列<br>
+  <span class="hl">cellSize</span> = (<span class="hl2">1920</span> − <span class="hl3">20</span> − <span class="hl3">230</span>) / 24 = 1670 / 24 = <strong style="color:#10b981;">69.58px</strong><br>
+  <br>
+  <strong>Widget 像素宽度计算：</strong><br>
+  2列 Widget = 2 × cellSize + 1 × gap = 2 × 69.58 + 10 = <strong style="color:#10b981;">149px</strong><br>
+  4列 Widget = 4 × cellSize + 3 × gap = 4 × 69.58 + 30 = <strong style="color:#10b981;">308px</strong>
+</div>
+
+<!-- 演示区域1：顶视图（带padding和gap标记） -->
+<h2 style="font-size:16px; margin-bottom:12px;">🔍 顶视图：padding / gap / cell 分布（仅显示前4列 + 最后1列）</h2>
+<div class="demo-area" id="demo1" style="height:200px;">
+  <!-- 由JS动态生成 -->
+</div>
+
+<!-- 演示区域2：实际Widget布局 -->
+<h2 style="font-size:16px; margin:24px 0 12px;">🗂️ 实际 Widget 布局（你的当前配置）</h2>
+<div class="demo-area" id="demo2" style="height:800px;">
+  <!-- 由JS动态生成 -->
+</div>
+
+<script>
+const SCREEN_W = 1920;
+const COLS = 24;
+const GAP = 10;
+const PADDING = 10;
+const CELL = (SCREEN_W - PADDING * 2 - (COLS - 1) * GAP) / COLS;
+const CELL_GAP = CELL + GAP;
+
+function buildDemo1() {
+  const el = document.getElementById('demo1');
+  const H = 200;
+  let html = '';
+
+  // padding 区域 (左右)
+  html += `<div class="padding-zone" style="left:0;top:0;width:${PADDING}px;height:${H}px;"></div>`;
+  html += `<div class="padding-zone" style="left:${SCREEN_W - PADDING}px;top:0;width:${PADDING}px;height:${H}px;"></div>`;
+
+  // padding 标签
+  html += `<div class="padding-label" style="top:${H/2-7}px;left:2px;">${PADDING}px</div>`;
+  html += `<div class="padding-label" style="top:${H/2-7}px;right:2px;">${PADDING}px</div>`;
+
+  // 只画前6列和后2列
+  const showCols = [0,1,2,3,4,5, 22,23];
+  for (const col of showCols) {
+    const left = PADDING + col * CELL_GAP;
+    // cell
+    html += `<div class="cell" style="left:${left}px;top:30px;width:${CELL}px;height:80px;">col ${col}</div>`;
+    // cell 尺寸标注
+    html += `<div class="annot-text" style="left:${left}px;top:114px;">${CELL.toFixed(1)}px</div>`;
+
+    // gap (除了最后一列)
+    if (col < COLS - 1) {
+      const gapLeft = left + CELL;
+      html += `<div class="gap-zone" style="left:${gapLeft}px;top:30px;width:${GAP}px;height:80px;"></div>`;
+      html += `<div class="gap-label" style="left:${gapLeft}px;top:114px;">${GAP}px</div>`;
+    }
+  }
+
+  // 省略号
+  html += `<div style="position:absolute;left:${PADDING + 6*CELL_GAP}px;top:55px;color:#888;font-size:20px;letter-spacing:4px;z-index:3;">· · · · · · · · · · · · · · ·</div>`;
+
+  // 底部标注
+  html += `<div class="annot-text" style="left:0;bottom:4px;">padding(${PADDING}px)</div>`;
+  html += `<div class="annot-text" style="left:${PADDING}px;bottom:4px;">← 内容区开始 (24列 × ${CELL.toFixed(1)}px + 23 × ${GAP}px = ${(24*CELL+23*GAP).toFixed(0)}px) →</div>`;
+  html += `<div class="annot-text" style="right:0;bottom:4px;">padding(${PADDING}px)</div>`;
+
+  el.innerHTML = html;
+}
+
+function buildDemo2() {
+  const el = document.getElementById('demo2');
+  const H = 800;
+  let html = '';
+
+  // padding 区域
+  html += `<div class="padding-zone" style="left:0;top:0;width:${PADDING}px;height:${H}px;"></div>`;
+  html += `<div class="padding-zone" style="left:${SCREEN_W - PADDING}px;top:0;width:${PADDING}px;height:${H}px;"></div>`;
+  html += `<div class="padding-label" style="top:4px;left:2px;">padding ${PADDING}px</div>`;
+  html += `<div class="padding-label" style="top:4px;right:2px;">padding ${PADDING}px</div>`;
+
+  // 所有 gap（垂直方向）
+  for (let col = 0; col < COLS - 1; col++) {
+    const left = PADDING + col * CELL_GAP + CELL;
+    html += `<div class="gap-zone" style="left:${left}px;top:0;width:${GAP}px;height:${H}px;"></div>`;
+  }
+  // 所有 gap（水平方向，按行）
+  for (let row = 0; row < 14 - 1; row++) {
+    const top = PADDING + row * CELL_GAP + CELL;
+    html += `<div class="gap-zone" style="left:${PADDING}px;top:${top}px;width:${SCREEN_W - PADDING*2}px;height:${GAP}px;"></div>`;
+  }
+
+  // 所有 cell（半透明背景）
+  for (let row = 0; row < 14; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const left = PADDING + col * CELL_GAP;
+      const top = PADDING + row * CELL_GAP;
+      html += `<div class="cell" style="left:${left}px;top:${top}px;width:${CELL}px;height:${CELL}px;">${col},${row}</div>`;
+    }
+  }
+
+  // Widget 布局 (和 App.tsx DEFAULT_WIDGETS 一致)
+  const widgets = [
+    { id:"clock", x:2, y:2, w:4, h:4, name:"时钟" },
+    { id:"sys", x:6, y:2, w:4, h:2, name:"系统监控" },
+    { id:"todo", x:6, y:4, w:4, h:4, name:"待办" },
+    { id:"countdown", x:10, y:2, w:2, h:2, name:"倒数日" },
+    { id:"shortcuts", x:10, y:4, w:2, h:2, name:"快捷指令" },
+    { id:"pomodoro", x:2, y:6, w:2, h:2, name:"番茄钟" },
+    { id:"prompt", x:10, y:6, w:2, h:2, name:"每日提示" },
+    { id:"weather", x:12, y:2, w:2, h:2, name:"天气" },
+    { id:"github", x:14, y:2, w:4, h:4, name:"PR监控" },
+    { id:"habit", x:4, y:6, w:2, h:2, name:"习惯打卡" },
+    { id:"quota", x:12, y:4, w:2, h:2, name:"AI额度" },
+    { id:"linux", x:18, y:6, w:4, h:4, name:"Linux资讯" },
+    { id:"ai-news", x:18, y:2, w:4, h:4, name:"AI资讯" },
+    { id:"weibo", x:14, y:6, w:4, h:4, name:"微博热搜" },
+  ];
+
+  widgets.forEach(w => {
+    const left = PADDING + w.x * CELL_GAP;
+    const top = PADDING + w.y * CELL_GAP;
+    const width = w.w * CELL + (w.w - 1) * GAP;
+    const height = w.h * CELL + (w.h - 1) * GAP;
+    html += `<div class="widget" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;">
+      ${w.name}<br><span style="font-size:10px;opacity:0.7;">${w.w}×${w.h} (${Math.round(width)}×${Math.round(height)}px)</span>
+    </div>`;
+  });
+
+  // 标注顶部padding
+  html += `<div class="padding-zone" style="left:0;top:0;width:${SCREEN_W}px;height:${PADDING}px;"></div>`;
+  html += `<div class="padding-zone" style="left:0;top:${H-PADDING}px;width:${SCREEN_W}px;height:${PADDING}px;"></div>`;
+
+  el.innerHTML = html;
+}
+
+function zoomDemo(val) {
+  const scale = val / 100;
+  document.getElementById('zoom-val').textContent = val + '%';
+  document.querySelectorAll('.demo-area').forEach(el => {
+    el.style.transform = `scale(${scale})`;
+    el.style.marginBottom = (el.offsetHeight * (scale - 1)) + 'px';
+  });
+}
+
+buildDemo1();
+buildDemo2();
+zoomDemo(50);
+</script>
+</body>
+</html>

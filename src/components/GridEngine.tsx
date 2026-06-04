@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import IframeHost from './IframeHost';
 
 export interface WidgetLayout {
@@ -10,12 +10,12 @@ export interface WidgetLayout {
   h: number;
 }
 
-const GRID_CONFIG = {
-  columns: 24,
-  rows: 14,
-  cellSize: 80,
-  gap: 12
-};
+const COLUMNS = 24;
+const GAP = 10;
+const PADDING = 10; // 单边 padding，与 GAP 一致
+
+// 默认 cellSize，在 ResizeObserver 触发前使用
+const DEFAULT_CELL_SIZE = 60;
 
 interface GridEngineProps {
   widgets: WidgetLayout[];
@@ -25,6 +25,28 @@ interface GridEngineProps {
 }
 
 export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDeleteWidget }: GridEngineProps) {
+  // 动态 cellSize，根据容器宽度自适应
+  const [cellSize, setCellSize] = useState(DEFAULT_CELL_SIZE);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const computeCellSize = () => {
+      const w = container.clientWidth;
+      // cellSize = (容器宽度 - 左右padding - (列数-1) * gap) / 列数
+      const size = (w - PADDING * 2 - (COLUMNS - 1) * GAP) / COLUMNS;
+      setCellSize(Math.max(size, 40)); // 最小 40px，防止极端窄屏
+    };
+
+    computeCellSize();
+
+    const observer = new ResizeObserver(() => computeCellSize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   // 拖拽状态
   const [dragState, setDragState] = useState<{
     id: string | null;
@@ -100,7 +122,7 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
     if (dragState.id === widget.instanceId) {
       e.currentTarget.releasePointerCapture(e.pointerId);
       
-      const cellTotalSize = GRID_CONFIG.cellSize + GRID_CONFIG.gap;
+      const cellTotalSize = cellSize + GAP;
       const deltaCellsX = Math.round(dragState.deltaX / cellTotalSize);
       const deltaCellsY = Math.round(dragState.deltaY / cellTotalSize);
       
@@ -133,13 +155,13 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
   };
 
   return (
-    <div className="relative w-full h-full p-6">
+    <div ref={containerRef} className="relative w-full h-full">
       {widgets.map((widget) => {
-        // 计算标准位置
-        let left = widget.x * (GRID_CONFIG.cellSize + GRID_CONFIG.gap);
-        let top = widget.y * (GRID_CONFIG.cellSize + GRID_CONFIG.gap);
-        const width = widget.w * GRID_CONFIG.cellSize + (widget.w - 1) * GRID_CONFIG.gap;
-        const height = widget.h * GRID_CONFIG.cellSize + (widget.h - 1) * GRID_CONFIG.gap;
+        // 计算标准位置（加上 padding 偏移，因为 absolute 定位相对容器外边缘）
+        let left = PADDING + widget.x * (cellSize + GAP);
+        let top = PADDING + widget.y * (cellSize + GAP);
+        const width = widget.w * cellSize + (widget.w - 1) * GAP;
+        const height = widget.h * cellSize + (widget.h - 1) * GAP;
 
         // 如果该组件正在被拖拽，加上实时的像素偏移量
         const isDragging = dragState.id === widget.instanceId;
