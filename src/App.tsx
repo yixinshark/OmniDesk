@@ -1,11 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import "./index.css";
-
-// 使用自定义协议加载本地视频文件
-function localVideoUrl(filename: string): string {
-  return `local-video://localhost/${filename}`;
-}
 import GridEngine, { WidgetLayout } from "./components/GridEngine";
 import WidgetDrawer from "./components/WidgetDrawer";
 import SettingsPage from "./components/SettingsPage";
@@ -19,7 +14,7 @@ interface AppConfig {
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  wallpaperType: 'static',
+  wallpaperType: 'video', // 改为默认 video，提升体验
   glassIntensity: 30,
   dailyAutoFetch: true,
 };
@@ -85,13 +80,30 @@ function App() {
 
   // 加载已保存的壁纸（从 activeWallpaper 配置）
   const loadSavedWallpaper = async (cfg: AppConfig) => {
+    // 如果是纯流媒体直链，不需要检查本地文件，直接播放
+    if (cfg.wallpaperType === 'video' && cfg.activeWallpaper?.startsWith('http')) {
+      setVideoUrl(cfg.activeWallpaper);
+      return;
+    }
+
     if (cfg.activeWallpaper) {
       try {
         const wallpapers = await invoke<Array<{filename: string, path: string, wtype: string}>>('list_wallpapers');
         const found = wallpapers.find(w => w.filename === cfg.activeWallpaper);
         if (found) {
+          // 关键检查：如果本地缓存的壁纸类型与当前配置的类型不符，则重新获取
+          if (found.wtype !== cfg.wallpaperType) {
+            console.log(`[Wallpaper] 类型不匹配 (cached: ${found.wtype}, config: ${cfg.wallpaperType})，重新获取...`);
+            fetchNewWallpaper(cfg.wallpaperType, cfg);
+            return;
+          }
           if (found.wtype === 'video') {
-            setVideoUrl(localVideoUrl(found.filename));
+            // 在新的纯流媒体逻辑下，activeWallpaper 保存的是 http 链接
+            if (cfg.activeWallpaper && cfg.activeWallpaper.startsWith('http')) {
+              setVideoUrl(cfg.activeWallpaper);
+            } else {
+              fetchNewWallpaper('video', cfg);
+            }
           } else {
             const dataUrl = await invoke<string | null>('get_image_data_url', { path: found.path });
             if (dataUrl) setBgUrl(dataUrl);
@@ -142,16 +154,12 @@ function App() {
         const allAssets = data.flatMap((d: any) => d.assets);
         const randomAsset = allAssets[Math.floor(Math.random() * allAssets.length)];
         const targetUrl = randomAsset.url;
-        const filename = targetUrl.substring(targetUrl.lastIndexOf('/') + 1);
-        const cachedPath = await invoke<string | null>('check_and_cache_video', { url: targetUrl, filename });
-        if (cachedPath) {
-          setVideoUrl(localVideoUrl(filename));
-          const newCfg = { ...cfg, activeWallpaper: filename };
-          setConfig(newCfg);
-          invoke('write_config', { config: newCfg }).catch(() => {});
-        } else {
-          setVideoUrl(targetUrl);
-        }
+        
+        // 强制使用在线流媒体以避免 WebKitGTK 兼容性问题，并避免后台下载竞争带宽
+        setVideoUrl(targetUrl);
+        const newCfg = { ...cfg, activeWallpaper: targetUrl };
+        setConfig(newCfg);
+        invoke('write_config', { config: newCfg }).catch(() => {});
       } catch (e) { console.error("获取动态壁纸失败:", e); }
     }
   }, [config]);
@@ -159,7 +167,11 @@ function App() {
   // 切换到已保存的壁纸
   const switchToWallpaper = useCallback(async (filename: string, path: string, wtype: string) => {
     if (wtype === 'video') {
-      setVideoUrl(localVideoUrl(filename));
+      if (filename.startsWith('http')) {
+        setVideoUrl(filename);
+      } else {
+        fetchNewWallpaper('video');
+      }
       setBgUrl('');
     } else {
       const dataUrl = await invoke<string | null>('get_image_data_url', { path });
@@ -188,9 +200,20 @@ function App() {
   }, [config.dailyAutoFetch, config.wallpaperType, config.lastFetchDate, fetchNewWallpaper]);
 
   const handleConfigChange = useCallback((newConfig: AppConfig) => {
+    const isWallpaperTypeChanged = config.wallpaperType !== newConfig.wallpaperType;
     setConfig(newConfig);
     invoke('write_config', { config: newConfig }).catch(err => console.error("保存配置失败:", err));
-  }, []);
+
+    if (isWallpaperTypeChanged) {
+      if (newConfig.wallpaperType === 'video') {
+        setBgUrl('');
+        setVideoUrl(''); // 在线播放无需 fallback
+      } else {
+        setVideoUrl('');
+      }
+      fetchNewWallpaper(newConfig.wallpaperType, newConfig);
+    }
+  }, [config, fetchNewWallpaper]);
 
   const handleWidgetChange = (newWidgets: WidgetLayout[]) => {
     setWidgets(newWidgets);
@@ -239,7 +262,13 @@ function App() {
         <video
           key={videoUrl}
           src={videoUrl}
-          autoPlay loop muted
+          autoPlay muted
+          onEnded={() => fetchNewWallpaper('video')}
+          onError={(e) => {
+            console.error("Video playback error, fetching next...", e);
+            fetchNewWallpaper('video');
+          }}
+          style={{ willChange: 'transform' }}
           className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none"
         />
       )}

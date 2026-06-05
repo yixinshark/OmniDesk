@@ -44,24 +44,14 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
       const cellWidth = (availableWidth - (DEFAULT_COLUMNS - 1) * DEFAULT_GAP) / DEFAULT_COLUMNS;
       const cellHeight = (availableHeight - (DEFAULT_ROWS - 1) * DEFAULT_GAP) / DEFAULT_ROWS;
       
-      // 使用较小的值确保是正方形，并且不溢出整个屏幕
-      const cellSize = Math.floor(Math.min(cellWidth, cellHeight));
-      
-      // 计算网格的总宽度和总高度
-      const totalGridWidth = DEFAULT_COLUMNS * cellSize + (DEFAULT_COLUMNS - 1) * DEFAULT_GAP;
-      const totalGridHeight = DEFAULT_ROWS * cellSize + (DEFAULT_ROWS - 1) * DEFAULT_GAP;
-      
-      // 计算居中所需的偏移量
-      const offsetX = Math.floor((window.innerWidth - totalGridWidth) / 2);
-      const offsetY = Math.floor((window.innerHeight - totalGridHeight) / 2);
-      
       setGridConfig({
         columns: DEFAULT_COLUMNS,
         rows: DEFAULT_ROWS,
-        cellSize,
+        cellWidth,
+        cellHeight,
         gap: DEFAULT_GAP,
-        offsetX,
-        offsetY
+        offsetX: 24, // 对应 p-6 的 padding
+        offsetY: 24
       });
     };
 
@@ -145,9 +135,8 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
     if (dragState.id === widget.instanceId) {
       e.currentTarget.releasePointerCapture(e.pointerId);
       
-      const cellTotalSize = gridConfig.cellSize + gridConfig.gap;
-      const deltaCellsX = Math.round(dragState.deltaX / cellTotalSize);
-      const deltaCellsY = Math.round(dragState.deltaY / cellTotalSize);
+      const deltaCellsX = Math.round(dragState.deltaX / (gridConfig.cellWidth + gridConfig.gap));
+      const deltaCellsY = Math.round(dragState.deltaY / (gridConfig.cellHeight + gridConfig.gap));
       
       // 更新该 widget 的坐标
       if (deltaCellsX !== 0 || deltaCellsY !== 0) {
@@ -181,10 +170,10 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
     <div className="relative w-full h-full overflow-hidden">
       {[...widgets].sort((a, b) => a.instanceId.localeCompare(b.instanceId)).map((widget) => {
         // 计算标准位置 (加上整体居中偏移量)
-        let left = gridConfig.offsetX + widget.x * (gridConfig.cellSize + gridConfig.gap);
-        let top = gridConfig.offsetY + widget.y * (gridConfig.cellSize + gridConfig.gap);
-        const width = widget.w * gridConfig.cellSize + (widget.w - 1) * gridConfig.gap;
-        const height = widget.h * gridConfig.cellSize + (widget.h - 1) * gridConfig.gap;
+        let left = gridConfig.offsetX + widget.x * (gridConfig.cellWidth + gridConfig.gap);
+        let top = gridConfig.offsetY + widget.y * (gridConfig.cellHeight + gridConfig.gap);
+        const width = widget.w * gridConfig.cellWidth + (widget.w - 1) * gridConfig.gap;
+        const height = widget.h * gridConfig.cellHeight + (widget.h - 1) * gridConfig.gap;
 
         // 如果该组件正在被拖拽，加上实时的像素偏移量
         const isDragging = dragState.id === widget.instanceId;

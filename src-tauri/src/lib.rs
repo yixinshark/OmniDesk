@@ -250,37 +250,9 @@ async fn check_and_cache_image(app_handle: tauri::AppHandle, url: String, filena
 
 #[tauri::command]
 async fn check_and_cache_video(app_handle: tauri::AppHandle, url: String, filename: String) -> Result<Option<String>, String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers").join(&filename);
-    if path.exists() {
-        return Ok(Some(path.to_string_lossy().to_string()));
-    }
-
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    
-    let tmp_path = path.with_extension("tmp");
-    if tmp_path.exists() {
-        return Ok(None);
-    }
-
-    tauri::async_runtime::spawn(async move {
-        let _ = std::fs::write(&tmp_path, b""); 
-        if let Ok(resp) = reqwest::get(&url).await {
-            if let Ok(bytes) = resp.bytes().await {
-                if std::fs::write(&tmp_path, bytes).is_ok() {
-                    let _ = std::fs::rename(&tmp_path, &path);
-                } else {
-                    let _ = std::fs::remove_file(&tmp_path);
-                }
-            } else {
-                let _ = std::fs::remove_file(&tmp_path);
-            }
-        } else {
-            let _ = std::fs::remove_file(&tmp_path);
-        }
-    });
-
+    // 废弃本地视频缓存机制：
+    // Linux WebKitGTK 无法可靠地播放带有自定义协议或 asset:// 的本地视频。
+    // 为了防止后台下载任务占用带宽导致前端在线流媒体卡顿/断流，我们在这里直接返回 None 并且不发起下载。
     Ok(None)
 }
 
@@ -522,30 +494,81 @@ pub fn run() {
             // Extract filename from URL: local-video://localhost/filename
             let url = request.uri().to_string();
             let filename = url.split('/').last().unwrap_or("");
-            // Get wallpapers dir from app data
             let app_handle = ctx.app_handle();
             let wallpapers_dir = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers");
             let file_path = wallpapers_dir.join(filename);
-            if file_path.exists() {
-                if let Ok(bytes) = std::fs::read(&file_path) {
-                    let mime = if filename.ends_with(".mp4") || filename.ends_with(".mov") {
-                        "video/mp4"
-                    } else if filename.ends_with(".webm") {
-                        "video/webm"
-                    } else {
-                        "application/octet-stream"
-                    };
-                    return http::Response::builder()
+
+            if !file_path.exists() {
+                return http::Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .unwrap();
+            }
+
+            let file_size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+            let mime = if filename.ends_with(".mp4") || filename.ends_with(".mov") {
+                "video/mp4"
+            } else if filename.ends_with(".webm") {
+                "video/webm"
+            } else {
+                "application/octet-stream"
+            };
+
+            // 解析 Range 请求头（WebKitGTK 播放视频必须支持 Range）
+            let range_header = request.headers().get("Range").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+
+            if range_header.starts_with("bytes=") {
+                let range_spec = &range_header[6..];
+                let parts: Vec<&str> = range_spec.split('-').collect();
+                let start: u64 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let end: u64 = if parts.len() > 1 && !parts[1].is_empty() {
+                    parts[1].parse().unwrap_or(file_size - 1)
+                } else {
+                    // 不要一次性读太大的块，限制为 2MB
+                    std::cmp::min(start + 2 * 1024 * 1024 - 1, file_size - 1)
+                };
+                let end = std::cmp::min(end, file_size - 1);
+                let length = end - start + 1;
+
+                use std::io::{Seek, Read};
+                let mut file = match std::fs::File::open(&file_path) {
+                    Ok(f) => f,
+                    Err(_) => return http::Response::builder().status(500).body(Vec::new()).unwrap(),
+                };
+                let _ = file.seek(std::io::SeekFrom::Start(start));
+                let mut buf = vec![0u8; length as usize];
+                let _ = file.read_exact(&mut buf);
+
+                return http::Response::builder()
+                    .status(206)
+                    .header("Content-Type", mime)
+                    .header("Content-Length", length.to_string())
+                    .header("Content-Range", format!("bytes {}-{}/{}", start, end, file_size))
+                    .header("Accept-Ranges", "bytes")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(buf)
+                    .unwrap();
+            }
+
+            // 非 Range 请求：返回完整文件（但也声明支持 Range）
+            match std::fs::read(&file_path) {
+                Ok(bytes) => {
+                    http::Response::builder()
+                        .status(200)
                         .header("Content-Type", mime)
+                        .header("Content-Length", file_size.to_string())
+                        .header("Accept-Ranges", "bytes")
                         .header("Access-Control-Allow-Origin", "*")
                         .body(bytes)
-                        .unwrap();
+                        .unwrap()
+                }
+                Err(_) => {
+                    http::Response::builder()
+                        .status(500)
+                        .body(Vec::new())
+                        .unwrap()
                 }
             }
-            http::Response::builder()
-                .status(404)
-                .body(Vec::new())
-                .unwrap()
         })
         .setup(|app| {
             if let Some(_window) = app.get_webview_window("main") {

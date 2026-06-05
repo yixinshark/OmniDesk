@@ -242,45 +242,7 @@ export default function SettingsPage({ isOpen, onClose, widgets, onWidgetChange,
                       </div>
                     )}
 
-                    {/* 动态壁纸 */}
-                    {videoWallpapers.length > 0 && (
-                      <div>
-                        <div className="text-white/30 text-[9px] uppercase tracking-wider mb-1.5">动态壁纸 ({videoWallpapers.length})</div>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {videoWallpapers.map(wp => (
-                            <div
-                              key={wp.filename}
-                              className={`group relative rounded-lg overflow-hidden cursor-pointer border transition-all ${
-                                config.activeWallpaper === wp.filename
-                                  ? 'border-blue-500 ring-1 ring-blue-500/50'
-                                  : 'border-white/8 hover:border-white/20'
-                              }`}
-                              onClick={() => onSwitchWallpaper(wp.filename, wp.path, wp.wtype)}
-                            >
-                              {thumbUrls[wp.filename] ? (
-                                <img
-                                  src={thumbUrls[wp.filename]}
-                                  alt={wp.filename}
-                                  className="w-full h-14 object-cover"
-                                />
-                              ) : (
-                                <div className="w-full h-14 bg-white/5 flex items-center justify-center text-lg">🎬</div>
-                              )}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleDelete(wp.filename); }}
-                                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-red-500/80 text-white w-4 h-4 rounded-full text-[10px] flex items-center justify-center transition-opacity z-10"
-                                title="删除"
-                              >
-                                ×
-                              </button>
-                              <div className="absolute bottom-0 left-0 right-0 bg-black/50 px-1 py-0.5 text-[8px] text-white/60 truncate">
-                                {wp.filename.replace(/\.[^.]+$/, '')}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    {/* 动态壁纸历史记录已隐藏：当前采用纯流媒体自动切台模式，不提供本地管理 */}
                   </div>
                 )}
               </section>
