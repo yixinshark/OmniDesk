@@ -1,45 +1,270 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>AI Quota</title>
-  <script src="/widget-sdk.js"></script>
+  <meta charset="utf-8" />
+  <title>DeepSeek 余额</title>
   <style>
     body {
-      margin: 0; padding: 16px; height: 100vh;
+      margin: 0; padding: 20px;
+      width: 100vw; height: 100vh;
       box-sizing: border-box;
-      font-family: system-ui, -apple-system, sans-serif;
-      background: rgba(0, 0, 0, 0.15);
-      color: rgba(255,255,255,0.9);
       display: flex; flex-direction: column; justify-content: center;
       -webkit-font-smoothing: antialiased;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      color: white;
     }
-    .title { font-size: 0.8rem; color: rgba(255,255,255,0.6); margin-bottom: 4px; }
-    .balance { font-size: 2.5rem; font-weight: 800; color: #10b981; }
-    .status { font-size: 0.7rem; color: rgba(255,255,255,0.4); margin-top: 8px; }
+
+    .main-view { display: flex; flex-direction: column; height: 100%; justify-content: space-between; padding: 4px 0; }
+    
+    .title-row {
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    
+    .title { font-size: 0.8rem; color: rgba(255,255,255,0.6); }
+    
+    .actions { display: flex; gap: 8px; }
+    .icon-btn { 
+      background: none; border: none; color: rgba(255,255,255,0.3); 
+      cursor: pointer; font-size: 0.9rem; padding: 0; transition: color 0.2s, transform 0.2s;
+    }
+    .icon-btn:hover { color: white; }
+    .icon-btn:active { transform: scale(0.9); }
+    .refreshing { animation: spin 1s linear infinite; color: white; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    .balance { font-size: 2.7rem; font-weight: 800; color: #10b981; line-height: 1; margin: 0; padding: 0; }
+    .status { font-size: 0.7rem; color: rgba(255,255,255,0.4); margin: 0; }
+
+    /* 设置页 */
+    .settings-view {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      height: 100%;
+      overflow-y: auto;
+    }
+    .settings-view::-webkit-scrollbar { display: none; }
+    
+    .settings-header {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .btn-back {
+      background: none; border: none; color: rgba(255,255,255,0.6); font-size: 1.2rem; cursor: pointer; padding: 0; line-height: 1; transition: 0.2s;
+    }
+    .btn-back:hover { color: white; }
+    .settings-title { font-size: 0.8rem; font-weight: bold; color: rgba(255,255,255,0.8); }
+
+    .input-group { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+    label { font-size: 0.75rem; color: rgba(255,255,255,0.6); }
+    input {
+      background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; padding: 6px 8px; color: white; font-size: 0.75rem; outline: none; width: 100%; box-sizing: border-box;
+    }
+
+    .radio-group {
+      display: flex; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 2px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .radio-group label {
+      flex: 1; text-align: center; font-size: 0.7rem; padding: 4px 0;
+      color: rgba(255,255,255,0.5); cursor: pointer; border-radius: 4px; transition: all 0.2s; margin: 0;
+    }
+    .radio-group input[type="radio"] { display: none; }
+    .radio-group input[type="radio"]:checked + label {
+      background: rgba(255,255,255,0.15); color: white; font-weight: bold;
+    }
+
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row input { flex: 1; }
+    
+    .btn-save {
+      background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px; padding: 6px; font-size: 0.8rem; font-weight: bold; cursor: pointer; margin-top: auto; flex-shrink: 0;
+    }
+    .btn-save:hover { background: rgba(255,255,255,0.2); }
   </style>
 </head>
 <body>
-  <div class="title">DeepSeek 余额</div>
-  <div class="balance" id="balance-value">¥--.--</div>
-  <div class="status" id="status-text">Loading...</div>
+  
+  <div class="main-view" id="view-main">
+    <div class="title-row">
+      <div class="title">DeepSeek 余额</div>
+      <div class="actions">
+        <button class="icon-btn" id="btn-refresh" title="立即刷新">↻</button>
+        <button class="icon-btn" id="btn-toggle-settings" title="设置">⚙</button>
+      </div>
+    </div>
+    <div class="balance" id="balance-value">¥--.--</div>
+    <div class="status" id="status-text">Loading...</div>
+  </div>
 
+  <div class="settings-view" id="view-settings">
+    <div class="settings-header">
+      <button class="btn-back" id="btn-back" title="返回">‹</button>
+      <div class="settings-title">设置</div>
+    </div>
+    
+    <div class="input-group">
+      <label>DeepSeek Key</label>
+      <input type="password" id="input-ds" placeholder="sk-..." />
+    </div>
+    
+    <div class="input-group">
+      <label>刷新方式</label>
+      <div class="radio-group">
+        <input type="radio" id="mode-manual" name="refresh-mode" value="manual">
+        <label for="mode-manual">手动</label>
+        <input type="radio" id="mode-auto" name="refresh-mode" value="auto">
+        <label for="mode-auto">自动</label>
+      </div>
+    </div>
+
+    <div class="input-group row" id="auto-config-row" style="display: none;">
+      <label>间隔(分钟)</label>
+      <input type="number" id="input-interval" min="1" value="1" />
+    </div>
+    
+    <button class="btn-save" id="btn-save">保存</button>
+  </div>
+
+  <script src="../../widget-sdk.js"></script>
   <script>
-    async function fetchQuota() {
+    const viewMain = document.getElementById('view-main');
+    const viewSettings = document.getElementById('view-settings');
+    
+    const inputDs = document.getElementById('input-ds');
+    const radioModes = document.getElementsByName('refresh-mode');
+    const inputInterval = document.getElementById('input-interval');
+    const autoConfigRow = document.getElementById('auto-config-row');
+    const btnRefresh = document.getElementById('btn-refresh');
+    
+    let isSettingsOpen = false;
+    let timerId = null;
+
+    let config = JSON.parse(localStorage.getItem('aiQuotaConfig') || '{"mode":"auto","interval":1}');
+
+    function getSelectedMode() {
+      for (const r of radioModes) if (r.checked) return r.value;
+      return 'auto';
+    }
+
+    function applyConfigUI() {
+      for (const r of radioModes) {
+        if (r.value === config.mode) r.checked = true;
+      }
+      inputInterval.value = config.interval;
+      autoConfigRow.style.display = config.mode === 'auto' ? 'flex' : 'none';
+    }
+
+    for (const r of radioModes) {
+      r.addEventListener('change', () => {
+        autoConfigRow.style.display = r.value === 'auto' ? 'flex' : 'none';
+      });
+    }
+
+    function formatMoney(num) {
+      if (num === undefined || num === null) return '--.--';
+      return Number(num).toFixed(2);
+    }
+
+    async function loadKeysAndInit() {
+      applyConfigUI();
       try {
-        // 由于没有真实 Token，这里做个演示逻辑
-        // 实际上可以通过 window.__widgetBridge.invoke('fetch_proxy', { url: '...' }) 发起跨域请求
-        const res = await window.__widgetBridge.invoke('fetch_proxy', { url: 'https://api.github.com/zen' });
-        // 假装解析成功
-        document.getElementById('balance-value').innerText = '¥12.50';
-        document.getElementById('status-text').innerText = '已更新: ' + new Date().toLocaleTimeString();
-      } catch (e) {
-        document.getElementById('balance-value').innerText = 'Error';
-        document.getElementById('status-text').innerText = 'Failed to fetch API';
+        const keys = await window.__widgetBridge.invoke('get_ai_keys');
+        inputDs.value = keys.deepseek || '';
+        
+        if (!keys.deepseek) {
+          showSettings();
+        } else {
+          await fetchQuota();
+          setupTimer();
+        }
+      } catch (err) {
+        showSettings();
       }
     }
-    fetchQuota();
-    setInterval(fetchQuota, 1000 * 60 * 30); // 30 min
+
+    function setupTimer() {
+      if (timerId) clearInterval(timerId);
+      if (config.mode === 'auto') {
+        const ms = Math.max(1, parseInt(config.interval) || 1) * 60 * 1000;
+        timerId = setInterval(fetchQuota, ms);
+      }
+    }
+
+    async function fetchQuota() {
+      if (isSettingsOpen) return;
+      document.getElementById('status-text').innerText = 'Syncing...';
+      btnRefresh.classList.add('refreshing');
+      
+      try {
+        const data = await window.__widgetBridge.invoke('fetch_ai_quota');
+        
+        if (data.deepseek_balance !== null) {
+          document.getElementById('balance-value').innerText = '¥' + formatMoney(data.deepseek_balance);
+          document.getElementById('status-text').innerText = '已更新: ' + new Date().toLocaleTimeString();
+        } else if (inputDs.value) {
+          document.getElementById('balance-value').innerText = 'Error';
+          document.getElementById('status-text').innerText = '请求失败或 Key 错误';
+        }
+      } catch (err) {
+        document.getElementById('balance-value').innerText = 'Error';
+        document.getElementById('status-text').innerText = 'Failed to fetch API';
+      } finally {
+        setTimeout(() => btnRefresh.classList.remove('refreshing'), 500);
+      }
+    }
+
+    btnRefresh.addEventListener('click', fetchQuota);
+
+    function showSettings() {
+      isSettingsOpen = true;
+      viewMain.style.display = 'none';
+      viewSettings.style.display = 'flex';
+      applyConfigUI();
+    }
+
+    function hideSettings() {
+      isSettingsOpen = false;
+      viewSettings.style.display = 'none';
+      viewMain.style.display = 'flex';
+      fetchQuota();
+    }
+
+    document.getElementById('btn-toggle-settings').addEventListener('click', showSettings);
+    document.getElementById('btn-back').addEventListener('click', hideSettings);
+
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-save');
+      btn.innerText = '保存中...';
+      
+      config.mode = getSelectedMode();
+      config.interval = parseInt(inputInterval.value) || 1;
+      localStorage.setItem('aiQuotaConfig', JSON.stringify(config));
+      
+      setupTimer();
+
+      try {
+        let currentKeys = { anyrouter: '' };
+        try { currentKeys = await window.__widgetBridge.invoke('get_ai_keys'); } catch(e) {}
+        
+        await window.__widgetBridge.invoke('save_ai_keys', {
+          deepseek: inputDs.value.trim(),
+          anyrouter: currentKeys.anyrouter
+        });
+        
+        btn.innerText = '已保存!';
+        setTimeout(() => {
+          btn.innerText = '保存';
+          hideSettings();
+        }, 500);
+      } catch (err) {
+        btn.innerText = '保存失败';
+      }
+    });
+
+    setTimeout(loadKeysAndInit, 500);
   </script>
 </body>
 </html>

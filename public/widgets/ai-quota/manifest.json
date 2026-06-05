@@ -1,1 +1,12 @@
-{"id":"ai-quota","name":"AI 额度","description":"AI API 额度监控","width":2,"height":2,"icon":"💰"}
+{
+  "id": "ai-quota",
+  "name": "AI Quota Monitor",
+  "description": "实时监控大模型 API 的余额与消耗额度",
+  "version": "1.0.0",
+  "author": "Antigravity",
+  "minWidth": 2,
+  "minHeight": 2,
+  "defaultWidth": 2,
+  "defaultHeight": 2,
+  "entry": "index.html"
+}

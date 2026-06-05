@@ -25,6 +25,105 @@ struct DiskIoPayload {
     write_bytes_per_sec: u64,
 }
 
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct AiKeys {
+    pub deepseek: String,
+    pub anyrouter: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AiQuotaPayload {
+    pub deepseek_balance: Option<f64>,
+    pub anyrouter_used: Option<f64>,
+    pub anyrouter_total: Option<f64>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+fn save_ai_keys(deepseek: String, anyrouter: String) -> Result<(), String> {
+    let keys = AiKeys { deepseek, anyrouter };
+    let path = dirs_next::home_dir()
+        .ok_or("Cannot find home directory")?
+        .join(".omnidesk")
+        .join("api_keys.json");
+        
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&keys).unwrap();
+    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_ai_keys() -> Result<AiKeys, String> {
+    let path = dirs_next::home_dir()
+        .ok_or("Cannot find home directory")?
+        .join(".omnidesk")
+        .join("api_keys.json");
+        
+    if path.exists() {
+        let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        if let Ok(keys) = serde_json::from_str::<AiKeys>(&content) {
+            return Ok(keys);
+        }
+    }
+    Ok(AiKeys::default())
+}
+
+#[tauri::command]
+async fn fetch_ai_quota() -> Result<AiQuotaPayload, String> {
+    let keys = get_ai_keys().unwrap_or_default();
+    let mut payload = AiQuotaPayload {
+        deepseek_balance: None,
+        anyrouter_used: None,
+        anyrouter_total: None,
+        error: None,
+    };
+    
+    let client = reqwest::Client::new();
+    
+    // Fetch DeepSeek
+    if !keys.deepseek.is_empty() {
+        if let Ok(resp) = client.get("https://api.deepseek.com/user/balance")
+            .bearer_auth(&keys.deepseek)
+            .send().await 
+        {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(infos) = json.get("balance_infos").and_then(|i| i.as_array()) {
+                    if let Some(info) = infos.first() {
+                        if let Some(bal_str) = info.get("total_balance").and_then(|v| v.as_str()) {
+                            payload.deepseek_balance = bal_str.parse::<f64>().ok();
+                        } else if let Some(bal_num) = info.get("total_balance").and_then(|v| v.as_f64()) {
+                            payload.deepseek_balance = Some(bal_num);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fetch AnyRouter
+    if !keys.anyrouter.is_empty() {
+        if let Ok(resp) = client.get("https://anyrouter.top/api/user/self")
+            .header("Authorization", format!("Bearer {}", keys.anyrouter))
+            .send().await
+        {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(data) = json.get("data") {
+                    if let (Some(quota), Some(used)) = (data.get("quota").and_then(|v| v.as_f64()), data.get("used_quota").and_then(|v| v.as_f64())) {
+                        payload.anyrouter_total = Some(quota / 500000.0);
+                        payload.anyrouter_used = Some(used / 500000.0);
+                    } else if let Some(quota) = data.get("quota").and_then(|v| v.as_f64()) {
+                         payload.anyrouter_total = Some(quota / 500000.0);
+                         payload.anyrouter_used = Some(0.0);
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(payload)
+}
+
 #[derive(Clone, Serialize)]
 struct SysInfoPayload {
     cpu_usage: f32,
@@ -415,7 +514,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             save_layout, load_layout, widget_read_file, widget_write_file, open_url, fetch_proxy, check_and_cache_video,
             list_available_widgets, get_top_processes, kill_process, read_config, write_config, check_and_cache_image,
-            list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url
+            list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url,
+            save_ai_keys, get_ai_keys, fetch_ai_quota
         ])
         .plugin(tauri_plugin_opener::init())
         .register_uri_scheme_protocol("local-video", |ctx, request| {
