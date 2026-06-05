@@ -209,10 +209,18 @@ function App() {
   // 键盘快捷键
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey && e.key.toLowerCase() === 'e') setIsEditMode(prev => !prev);
+      if (e.altKey && e.key.toLowerCase() === 'e') {
+        setIsEditMode(prev => !prev);
+      }
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        setIsEditMode(false);
+        setIsDrawerOpen(false);
+        setIsSettingsOpen(false);
+        setContextMenu(null);
+      }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true); // 使用捕获阶段
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
   // 毛玻璃强度
@@ -240,7 +248,7 @@ function App() {
 
       {isEditMode && !isWidgetsHidden && (
         <div className="absolute top-0 left-0 w-full bg-blue-500/80 backdrop-blur text-white text-center py-2 z-50 font-bold shadow-lg transition-opacity flex items-center justify-center gap-4">
-          <span>进入布局编辑模式：拖拽移动组件，点 × 删除。按 Alt+E 退出。</span>
+          <span>进入布局编辑模式：拖拽移动组件，点 × 删除。按 Alt+E 或 Esc 退出。</span>
           <button
             onClick={(e) => { e.stopPropagation(); setIsDrawerOpen(true); }}
             className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full text-sm cursor-pointer transition-colors"

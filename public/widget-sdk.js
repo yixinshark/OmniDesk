@@ -25,6 +25,18 @@
     }
   });
 
+  // 转发键盘事件给宿主，以防止焦点在 iframe 内时顶层无法响应快捷键
+  window.addEventListener('keydown', (e) => {
+    window.parent.postMessage({
+      type: 'KEY_DOWN',
+      key: e.key,
+      altKey: e.altKey,
+      ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
+      metaKey: e.metaKey
+    }, '*');
+  });
+
   // 注入全局 API 供 Widget 业务代码调用
   window.__widgetBridge = {
     // 调用 Rust 后端能力

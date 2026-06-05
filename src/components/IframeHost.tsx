@@ -55,6 +55,19 @@ export default function IframeHost({ instanceId, src }: IframeHostProps) {
         });
         unlistenFns.current[eventName] = unlisten;
       }
+      // 处理来自 Iframe 的键盘事件穿透
+      else if (data.type === 'KEY_DOWN') {
+        const keyboardEvent = new KeyboardEvent('keydown', {
+          key: data.key,
+          altKey: data.altKey,
+          ctrlKey: data.ctrlKey,
+          shiftKey: data.shiftKey,
+          metaKey: data.metaKey,
+          bubbles: true,
+          cancelable: true
+        });
+        window.dispatchEvent(keyboardEvent);
+      }
     };
 
     window.addEventListener('message', handleMessage);

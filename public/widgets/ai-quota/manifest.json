@@ -1,7 +1,8 @@
 {
   "id": "ai-quota",
-  "name": "AI Quota Monitor",
-  "description": "实时监控大模型 API 的余额与消耗额度",
+  "name": "DeepSeek 余额",
+  "description": "实时监控大模型 API 余额",
+  "icon": "💰",
   "version": "1.0.0",
   "author": "Antigravity",
   "minWidth": 2,

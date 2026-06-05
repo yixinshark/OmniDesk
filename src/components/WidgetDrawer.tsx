@@ -62,7 +62,7 @@ export default function WidgetDrawer({ isOpen, onClose, onAddWidget, existingWid
       />
 
       {/* 抽屉面板 */}
-      <div className="fixed right-0 top-0 h-full w-80 bg-gray-900/95 backdrop-blur-xl border-l border-white/10 z-50 flex flex-col shadow-2xl">
+      <div className="fixed right-0 top-0 h-full w-80 bg-black/75 backdrop-blur-3xl border-l border-white/10 z-50 flex flex-col shadow-[0_0_40px_rgba(0,0,0,0.5)]">
         {/* 头部 */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <h2 className="text-white text-lg font-bold">🧩 添加组件</h2>
@@ -86,10 +86,10 @@ export default function WidgetDrawer({ isOpen, onClose, onAddWidget, existingWid
               return (
                 <div
                   key={widget.id}
-                  className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                  className={`p-3 rounded-2xl border transition-all duration-300 cursor-pointer ${
                     isAdded
-                      ? 'border-white/10 bg-white/5 opacity-60'
-                      : 'border-white/20 bg-white/10 hover:bg-white/15 hover:border-white/30'
+                      ? 'border-white/10 bg-white/5 opacity-70'
+                      : 'border-white/10 bg-gradient-to-br from-white/10 to-white/5 hover:from-white/20 hover:to-white/10 hover:border-white/30 hover:shadow-[0_8px_20px_rgba(0,0,0,0.2)] hover:-translate-y-1'
                   }`}
                   onClick={() => !isAdded && handleAdd(widget)}
                 >
