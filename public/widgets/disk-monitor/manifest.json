@@ -1,0 +1,8 @@
+{
+  "id": "disk-monitor",
+  "name": "Disk Storage",
+  "description": "Monitors local disk space and I/O rates with beautiful circular progress rings.",
+  "width": 6,
+  "height": 4,
+  "icon": "💾"
+}

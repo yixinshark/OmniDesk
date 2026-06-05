@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>Disk Monitor</title>
+  <script src="/widget-sdk.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      /* 增加深色半透明渐变背景，显著提升在亮色壁纸下的对比度 */
+      background: linear-gradient(135deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.15) 100%);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      /* 增加全局基础文字阴影 */
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px 4px;
+      flex-shrink: 0;
+    }
+    .title { font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.85); letter-spacing: 0.5px; }
+
+    .content { 
+      flex: 1; 
+      display: flex; 
+      gap: 16px; 
+      padding: 4px 16px 16px; 
+      overflow-x: hidden;
+      overflow-y: hidden;
+    }
+
+    /* 隐藏滚动条 */
+    .content::-webkit-scrollbar { display: none; }
+    
+    .disk-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 0; /* 允许内部元素收缩以进行文本截断 */
+      width: 50%;
+      flex: 1;
+      justify-content: space-between; /* 恢复两端对齐，撑满全高 */
+      
+      /* 新增的独立背景与边界样式 */
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    /* 环形进度条 */
+    .gauge-container {
+      position: relative; 
+      width: 110px; 
+      height: 110px;
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.4));
+    }
+    
+    .gauge { 
+      width: 100%; 
+      height: 100%; 
+      transform: rotate(-225deg); /* 半圆起步角度调整 */
+    }
+    
+    .bg, .fill { 
+      fill: none; 
+      stroke-width: 8; 
+      stroke-linecap: round;
+    }
+    
+    .bg { stroke: rgba(255,255,255,0.1); }
+    
+    /* 圆弧的总长度是 PI * r. 这里的 r 是 44，周长约 276. 
+       我们将它限制在四分之三圆，也就是 276 * 0.75 = 207 
+    */
+    .fill { 
+      stroke-dasharray: 207, 276; 
+      stroke-dashoffset: 207; /* 空的状态 */
+      transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.8s; 
+    }
+    
+    .gauge-info {
+      position: absolute; 
+      inset: 0;
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center;
+      padding-top: 10px; /* 因为缺口在下方 */
+    }
+    
+    .gauge-val { 
+      font-size: 1.5rem; 
+      font-weight: 800; 
+      color: rgba(255,255,255,0.95); 
+      text-shadow: 0 2px 5px rgba(0,0,0,0.9); 
+    }
+    
+    .gauge-label { 
+      font-size: 0.65rem; 
+      font-weight: 600; 
+      color: rgba(255,255,255,0.5); 
+      letter-spacing: 1px; 
+      text-transform: uppercase; 
+    }
+
+    .disk-name {
+      font-size: 12px;
+      font-weight: 700;
+      margin-top: 8px;
+      text-align: center;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+    }
+
+    .disk-details {
+      font-size: 10px;
+      color: rgba(255,255,255,0.6);
+      text-align: center;
+      margin-top: 4px;
+      margin-bottom: auto; /* 让中间内容自然排布，把IO挤到最底下 */
+      line-height: 1.4;
+    }
+
+    /* I/O 折线图区域 */
+    .io-section {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      margin-top: 16px;
+    }
+    
+    .io-title {
+      font-size: 10px;
+      font-weight: 800;
+      color: rgba(255,255,255,0.9);
+      text-align: left;
+      letter-spacing: 0.5px;
+    }
+    
+    .io-text {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+    }
+    .io-read { color: #60a5fa; }
+    .io-write { color: #c084fc; }
+
+    .sparkline {
+      width: 100%;
+      height: 24px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 4px;
+      position: relative;
+      overflow: hidden;
+    }
+    .sparkline svg { width: 100%; height: 100%; }
+    .sparkline-read { stroke: #60a5fa; stroke-width: 1.5; fill: none; stroke-linejoin: round; }
+    .sparkline-write { stroke: #c084fc; stroke-width: 1.5; fill: none; stroke-linejoin: round; }
+
+  </style>
+</head>
+<body>
+  <!-- 全局 SVG 渐变定义 -->
+  <svg style="width:0; height:0; position:absolute;" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="normalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#3b82f6"/>
+        <stop offset="100%" stop-color="#c084fc"/>
+      </linearGradient>
+      <linearGradient id="dangerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#fbbf24"/>
+        <stop offset="100%" stop-color="#ef4444"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <div class="header">
+    <span class="title">💾 DISK USAGE</span>
+  </div>
+
+  <div class="content" id="disk-container">
+    <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:12px; color:rgba(255,255,255,0.5);">
+      Loading disk info...
+    </div>
+  </div>
+
+  <script>
+    const ARC_LENGTH = 207; // 276 * 0.75
+    
+    function fmtBytes(bytes, decimals = 1) {
+      if (!+bytes) return '0 B';
+      const k = 1024; // 恢复为 1024 (GiB 进位)，这是最准确的文件系统计量方式
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+    }
+
+    function getGradientId(pct) {
+      if (pct > 90) return 'dangerGrad';
+      return 'normalGrad';
+    }
+
+    const ioHistories = {}; // { "sda": { read: [], write: [] } }
+
+    window.__widgetBridge.on('sysinfo_update', (data) => {
+      if (!data || !data.disks) return;
+
+      const container = document.getElementById('disk-container');
+      
+      // We limit to max 2 disks visually for 6x4 size to keep it clean, 
+      // preferring / and /home or the first two physical drives
+      const displayDisks = data.disks.slice(0, 2);
+      
+      // Update historical IO
+      if (data.disk_io) {
+        data.disk_io.forEach(io => {
+          if (!ioHistories[io.name]) {
+            ioHistories[io.name] = { read: new Array(20).fill(0), write: new Array(20).fill(0) };
+          }
+          ioHistories[io.name].read.push(io.read_bytes_per_sec);
+          ioHistories[io.name].read.shift();
+          ioHistories[io.name].write.push(io.write_bytes_per_sec);
+          ioHistories[io.name].write.shift();
+        });
+      }
+
+      if (displayDisks.length > 0 && container.innerHTML.includes('Loading')) {
+        container.innerHTML = '';
+        
+        // Create templates for disks
+        displayDisks.forEach((disk, idx) => {
+          const card = document.createElement('div');
+          card.className = 'disk-card';
+          card.id = `disk-card-${idx}`;
+          container.appendChild(card);
+        });
+      }
+
+      displayDisks.forEach((disk, idx) => {
+        const card = document.getElementById(`disk-card-${idx}`);
+        if (!card) return;
+
+        const used = disk.used_space !== undefined ? disk.used_space : (disk.total_space - disk.available_space);
+        const pct = disk.total_space > 0 ? (used / disk.total_space) * 100 : 0;
+        const offset = ARC_LENGTH - (pct / 100) * ARC_LENGTH;
+
+        // Try to map IO to this specific disk partition
+        // For example, disk.name might be "/dev/nvme0n1p2" and io.name might be "nvme0n1"
+        let ioRead = 0;
+        let ioWrite = 0;
+        let rPoints = '';
+        let wPoints = '';
+        
+        if (data.disk_io && data.disk_io.length > 0) {
+          // Find the IO device whose name is a substring of the partition's device name (e.g. nvme0n1 inside /dev/nvme0n1p2)
+          // Or fallback to the first IO device if we can't map it.
+          let matchedIo = data.disk_io.find(io => disk.name.includes(io.name)) || data.disk_io[0];
+          
+          if (matchedIo) {
+            ioRead = matchedIo.read_bytes_per_sec;
+            ioWrite = matchedIo.write_bytes_per_sec;
+            
+            if (ioHistories[matchedIo.name]) {
+              const h = ioHistories[matchedIo.name];
+              const maxR = Math.max(...h.read, 1024 * 512); // min 512KB/s scale
+              const maxW = Math.max(...h.write, 1024 * 512);
+              
+              rPoints = h.read.map((v, i) => `${(i / 19) * 100},${24 - (v / maxR) * 20}`).join(' ');
+              wPoints = h.write.map((v, i) => `${(i / 19) * 100},${24 - (v / maxW) * 20}`).join(' ');
+            }
+          }
+        }
+
+        let dName = disk.mount_point === '/' ? 'SYSTEM (/)' : disk.mount_point.toUpperCase();
+        if (dName.length > 20) {
+          // 提取挂载路径最后一部分或者保留首尾
+          let parts = disk.mount_point.split('/').filter(p => p);
+          dName = parts.length > 0 ? '/' + parts[parts.length - 1].toUpperCase() : dName;
+        }
+
+        card.innerHTML = `
+          <div class="gauge-container">
+            <svg viewBox="0 0 100 100" class="gauge">
+              <!-- Background Arc -->
+              <circle class="bg" cx="50" cy="50" r="44" stroke-dasharray="207, 276" stroke-dashoffset="0"/>
+              <!-- Fill Arc -->
+              <circle class="fill" cx="50" cy="50" r="44" style="stroke: url(#${getGradientId(pct)}); stroke-dashoffset: ${offset};"/>
+            </svg>
+            <div class="gauge-info">
+              <span class="gauge-val">${Math.round(pct)}%</span>
+              <span class="gauge-label">USED</span>
+            </div>
+          </div>
+          
+          <div class="disk-name" title="${disk.mount_point}">${dName}</div>
+          <div class="disk-details">
+            Used: ${fmtBytes(used, 0)} / ${fmtBytes(disk.total_space, 0)}
+            <span style="margin: 0 4px; opacity: 0.3;">|</span>
+            <span style="color: #4ade80; font-weight: 600;">Free: ${fmtBytes(disk.available_space, 0)}</span>
+          </div>
+          
+          <div class="io-section">
+            <div class="io-title">DISK I/O</div>
+            <div class="io-text">
+              <span class="io-read">R: ${fmtBytes(ioRead)}/s</span>
+              <span class="io-write">W: ${fmtBytes(ioWrite)}/s</span>
+            </div>
+            <div class="sparkline">
+              <svg viewBox="0 0 100 24" preserveAspectRatio="none">
+                <polyline class="sparkline-read" points="${rPoints || '0,24 100,24'}"></polyline>
+                <polyline class="sparkline-write" points="${wPoints || '0,24 100,24'}"></polyline>
+              </svg>
+            </div>
+          </div>
+        `;
+      });
+    });
+  </script>
+</body>
+</html>

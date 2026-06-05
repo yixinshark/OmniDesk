@@ -2,9 +2,28 @@ pub mod display;
 
 use display::DisplayBackend;
 use tauri::{Manager, Emitter};
-use sysinfo::{System, Networks, Components};
+use sysinfo::{System, Networks, Components, Disks};
 use std::time::Duration;
+use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+
+#[derive(Clone, Serialize)]
+struct DiskUsagePayload {
+    name: String,
+    mount_point: String,
+    total_space: u64,
+    available_space: u64,
+    used_space: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct DiskIoPayload {
+    name: String,
+    read_bytes_per_sec: u64,
+    write_bytes_per_sec: u64,
+}
 
 #[derive(Clone, Serialize)]
 struct SysInfoPayload {
@@ -14,6 +33,8 @@ struct SysInfoPayload {
     cpu_temp: f32,
     net_bytes_in: u64,
     net_bytes_out: u64,
+    disks: Vec<DiskUsagePayload>,
+    disk_io: Vec<DiskIoPayload>,
 }
 
 #[derive(Clone, Serialize)]
@@ -449,12 +470,14 @@ pub fn run() {
                 let mut sys = System::new_all();
                 let mut networks = Networks::new_with_refreshed_list();
                 let mut components = Components::new_with_refreshed_list();
+                let mut disks = Disks::new_with_refreshed_list();
                 sys.refresh_all();
                 // 启动时稍作延迟，确保 CPU 测算有基准数据
                 std::thread::sleep(Duration::from_millis(500));
 
                 let mut prev_bytes_in: u64 = 0;
                 let mut prev_bytes_out: u64 = 0;
+                let mut prev_disk_io: HashMap<String, (u64, u64)> = HashMap::new(); // sectors read, written
                 let mut first_run = true;
 
                 loop {
@@ -462,6 +485,7 @@ pub fn run() {
                     sys.refresh_memory();
                     networks.refresh(true);
                     components.refresh(true);
+                    disks.refresh(true);
 
                     let cpu_usage = sys.global_cpu_usage();
                     let total_mem = sys.total_memory();
@@ -511,6 +535,71 @@ pub fn run() {
                     let net_bytes_out = if first_run { 0 } else { total_out.saturating_sub(prev_bytes_out) };
                     prev_bytes_in = total_in;
                     prev_bytes_out = total_out;
+                    let mut disk_usage = Vec::new();
+                    for disk in &disks {
+                        let mount_point = disk.mount_point().to_string_lossy().to_string();
+                        // 过滤掉 snap, loop, boot 等非用户数据盘
+                        if mount_point.starts_with("/snap/") || mount_point.starts_with("/run/") || mount_point.starts_with("/sys/") || mount_point.starts_with("/dev/") || mount_point.starts_with("/boot") || disk.is_removable() {
+                            continue;
+                        }
+                        
+                        let mut total_space = disk.total_space();
+                        let mut available_space = disk.available_space();
+                        let mut used_space = total_space.saturating_sub(available_space);
+                        
+                        // 使用 libc::statvfs 获取最精确的文件系统块数据（排除 Linux ext4 预留给 root 的 5% 空间的影响）
+                        let c_mount_point = std::ffi::CString::new(mount_point.clone()).unwrap_or_default();
+                        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+                        if unsafe { libc::statvfs(c_mount_point.as_ptr(), &mut stat) } == 0 {
+                            total_space = (stat.f_blocks as u64) * (stat.f_frsize as u64);
+                            let free_space = (stat.f_bfree as u64) * (stat.f_frsize as u64);
+                            available_space = (stat.f_bavail as u64) * (stat.f_frsize as u64);
+                            used_space = total_space.saturating_sub(free_space);
+                        }
+
+                        disk_usage.push(DiskUsagePayload {
+                            name: disk.name().to_string_lossy().to_string(),
+                            mount_point,
+                            total_space,
+                            available_space,
+                            used_space,
+                        });
+                    }
+
+                    let mut disk_io = Vec::new();
+                    if let Ok(file) = File::open("/proc/diskstats") {
+                        let reader = BufReader::new(file);
+                        for line in reader.lines() {
+                            if let Ok(line) = line {
+                                let parts: Vec<&str> = line.split_whitespace().collect();
+                                if parts.len() >= 14 {
+                                    let name = parts[2].to_string();
+                                    // 仅统计物理设备如 nvme, sd 等，忽略 loop 和 ram
+                                    if name.starts_with("loop") || name.starts_with("ram") || name.starts_with("sr") {
+                                        continue;
+                                    }
+                                    if let (Ok(sectors_read), Ok(sectors_written)) = (parts[5].parse::<u64>(), parts[9].parse::<u64>()) {
+                                        let prev = prev_disk_io.entry(name.clone()).or_insert((sectors_read, sectors_written));
+                                        
+                                        let read_bytes = if first_run { 0 } else { sectors_read.saturating_sub(prev.0) * 512 };
+                                        let write_bytes = if first_run { 0 } else { sectors_written.saturating_sub(prev.1) * 512 };
+                                        
+                                        *prev = (sectors_read, sectors_written);
+
+                                        // 过滤掉子分区 (如 nvme0n1p1), 只记录主磁盘设备的 IO 以防止重复计算
+                                        if !name.chars().last().unwrap_or('a').is_digit(10) || name.contains("nvme") && !name.contains("p") {
+                                            disk_io.push(DiskIoPayload {
+                                                name: name.clone(),
+                                                read_bytes_per_sec: read_bytes / 2, // 2秒的间隔
+                                                write_bytes_per_sec: write_bytes / 2,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     first_run = false;
 
                     let payload = SysInfoPayload {
@@ -520,6 +609,8 @@ pub fn run() {
                         cpu_temp,
                         net_bytes_in,
                         net_bytes_out,
+                        disks: disk_usage,
+                        disk_io,
                     };
 
                     // 广播给前端（2秒间隔，避免频繁 emit 导致 UI 卡顿）
