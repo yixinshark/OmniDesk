@@ -97,7 +97,8 @@
       <button class="btn-save" onclick="addRepo()">添加</button>
     </div>
     <div class="input-row" style="margin-top:-2px;">
-      <input type="password" id="token-input" class="input-field" placeholder="GitHub Token (必填,用于识别身份)" onkeydown="if(event.key === 'Enter') saveToken()" />
+      <input type="password" id="token-input" class="input-field" placeholder="GitHub Token (用于识别身份)" onkeydown="if(event.key === 'Enter') saveToken()" />
+      <button class="btn-save" style="background: rgba(59,130,246,0.3); color: #60a5fa;" onclick="window.__widgetBridge.invoke('open_url', { url: 'https://github.com/settings/tokens/new?description=OmniDesk+GitHub+Widget&scopes=repo' })">获取</button>
       <button class="btn-save" onclick="saveToken()">保存</button>
     </div>
     <div class="input-row" style="margin-top:-2px;">
@@ -341,7 +342,14 @@
         let msg = e.message || String(e);
         const listEl = document.getElementById('pr-list');
         if (msg.toLowerCase().includes("rate limit")) {
-          listEl.innerHTML = '<div class="status" style="color:#ef4444; margin-top:20px; line-height:1.6;"><div style="font-weight:bold;margin-bottom:6px;">⚠️ 请求已达公共接口上限</div><span style="color:#34d399;cursor:pointer;text-decoration:underline;" onclick="toggleConfig()">点击此处配置 GitHub Token 解除限制</span></div>';
+          listEl.innerHTML = `
+            <div class="status" style="color:#ef4444; margin-top:20px; line-height:1.6;">
+              <div style="font-weight:bold;margin-bottom:6px;">⚠️ 请求已达公共接口上限</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <span style="color:#60a5fa;cursor:pointer;text-decoration:underline;" onclick="window.__widgetBridge.invoke('open_url', { url: 'https://github.com/settings/tokens/new?description=OmniDesk+GitHub+Widget&scopes=repo' })">1. 点击前往 GitHub 生成 Token</span>
+                <span style="color:#34d399;cursor:pointer;text-decoration:underline;" onclick="toggleConfig()">2. 点击此处打开设置面板粘贴 Token</span>
+              </div>
+            </div>`;
         } else {
           listEl.innerHTML = `<div class="status" style="color:#ef4444; margin-top:30px;">获取失败: ${msg}</div>`;
         }
