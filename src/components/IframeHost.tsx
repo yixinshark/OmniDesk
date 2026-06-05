@@ -41,17 +41,19 @@ export default function IframeHost({ instanceId, src }: IframeHostProps) {
       // 处理事件订阅请求
       else if (data.type === 'SUBSCRIBE') {
         const eventName = data.event;
-        // 避免重复订阅
-        if (!unlistenFns.current[eventName]) {
-          const unlisten = await listen(eventName, (tauriEvent) => {
-            iframeRef.current?.contentWindow?.postMessage({
-              type: 'EVENT',
-              event: eventName,
-              payload: tauriEvent.payload
-            }, '*');
-          });
-          unlistenFns.current[eventName] = unlisten;
+        // 如果之前已经订阅过，先取消旧的订阅，防止闭包或引用失效
+        if (unlistenFns.current[eventName]) {
+          unlistenFns.current[eventName]();
         }
+        
+        const unlisten = await listen(eventName, (tauriEvent) => {
+          iframeRef.current?.contentWindow?.postMessage({
+            type: 'EVENT',
+            event: eventName,
+            payload: tauriEvent.payload
+          }, '*');
+        });
+        unlistenFns.current[eventName] = unlisten;
       }
     };
 

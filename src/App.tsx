@@ -61,8 +61,14 @@ function App() {
   useEffect(() => {
     invoke<WidgetLayout[] | null>('load_layout')
       .then(saved => {
-        if (saved && saved.length > 0) setWidgets(saved);
-        else setWidgets(DEFAULT_WIDGETS);
+        let loaded = saved && saved.length > 0 ? saved : DEFAULT_WIDGETS;
+        // 强制约束边界，防止旧的 layout 数据超出了 24x14 网格引起溢出
+        loaded = loaded.map(w => ({
+          ...w,
+          x: Math.max(0, Math.min(24 - w.w, w.x)),
+          y: Math.max(0, Math.min(14 - w.h, w.y))
+        }));
+        setWidgets(loaded);
       })
       .catch(() => setWidgets(DEFAULT_WIDGETS));
 
