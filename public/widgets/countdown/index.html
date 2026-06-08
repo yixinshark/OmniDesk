@@ -13,6 +13,7 @@
       color: rgba(255,255,255,0.9);
       background: rgba(0, 0, 0, 0.15);
       -webkit-font-smoothing: antialiased;
+      position: relative;
     }
     .event-name {
       font-size: 0.9rem;
@@ -38,46 +39,211 @@
       margin-top: 12px;
       color: rgba(255,255,255,0.4);
     }
+    .settings-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5);
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+      opacity: 0;
+    }
+    body:hover .settings-btn {
+      opacity: 1;
+    }
+    .settings-btn:hover {
+      background: rgba(255,255,255,0.2);
+      color: rgba(255,255,255,0.9);
+    }
+    .settings-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 10;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .settings-overlay.show {
+      display: flex;
+    }
+    .settings-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.9);
+      margin-bottom: 12px;
+      letter-spacing: 1px;
+    }
+    .settings-field {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .settings-label {
+      font-size: 0.7rem;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 6px;
+    }
+    .settings-input {
+      width: 64px;
+      padding: 5px 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.9);
+      font-size: 1rem;
+      font-weight: 600;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .settings-input:focus {
+      border-color: #ff8787;
+    }
+    .settings-hint {
+      font-size: 0.65rem;
+      color: rgba(255,255,255,0.3);
+      margin-top: 4px;
+    }
+    .settings-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .settings-actions button {
+      padding: 4px 16px;
+      border-radius: 5px;
+      border: none;
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-save {
+      background: #ff8787;
+      color: #fff;
+    }
+    .btn-save:hover {
+      background: #ff6b6b;
+    }
+    .btn-cancel {
+      background: rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.8);
+    }
+    .btn-cancel:hover {
+      background: rgba(255,255,255,0.25);
+    }
   </style>
 </head>
 <body>
+  <button class="settings-btn" id="settings-btn" title="设置">⚙</button>
+
   <div class="event-name" id="event-name">距离发工资还有</div>
   <div>
     <span class="days" id="days-left">--</span><span class="unit">天</span>
   </div>
   <div class="target-date" id="target-date">目标日: ----/--/--</div>
 
+  <div class="settings-overlay" id="settings-overlay">
+    <div class="settings-title">设置</div>
+    <div class="settings-field">
+      <div class="settings-label">每月发工资日期</div>
+      <input class="settings-input" id="payday-input" type="number" min="1" max="31" value="10">
+      <div class="settings-hint">请输入 1-31 的日期</div>
+    </div>
+    <div class="settings-actions">
+      <button class="btn-cancel" id="btn-cancel">取消</button>
+      <button class="btn-save" id="btn-save">保存</button>
+    </div>
+  </div>
+
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const instanceId = urlParams.get('instanceId') || 'countdown_default';
     const configFile = `${instanceId}.json`;
-    
-    // 默认配置
-    let config = { event: '发工资', date: '2026-06-15' }; 
+
+    // 默认配置：每月10号发工资
+    let config = { event: '发工资', payday: 10 };
+
+    // 根据 payday 计算下一个目标日期
+    function getNextPaydayDate(payday) {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+
+      // 本月的目标日
+      let target = new Date(year, month, payday);
+      target.setHours(0, 0, 0, 0);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // 如果本月目标日已过或就是今天，取下个月
+      if (target <= today) {
+        target = new Date(year, month + 1, payday);
+      }
+
+      return target;
+    }
+
+    function formatDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}/${m}/${d}`;
+    }
 
     async function loadConfig() {
       try {
         const data = await window.__widgetBridge.invoke('widget_read_file', { filename: configFile });
-        if (data) config = JSON.parse(data);
+        if (data) {
+          const parsed = JSON.parse(data);
+          config = { ...config, ...parsed };
+        }
       } catch (e) {
-        // 如果文件不存在，写入默认配置
+        // 文件不存在，写入默认配置
         window.__widgetBridge.invoke('widget_write_file', { filename: configFile, content: JSON.stringify(config) });
       }
+
+      // 兼容旧配置：如果有固定 date 字段但没有 payday，迁移到 payday
+      if (config.date && !config.payday) {
+        const d = new Date(config.date);
+        config.payday = d.getDate();
+        delete config.date;
+        saveConfig();
+      }
+
       render();
+    }
+
+    function saveConfig() {
+      window.__widgetBridge.invoke('widget_write_file', { filename: configFile, content: JSON.stringify(config) });
     }
 
     function render() {
       document.getElementById('event-name').innerText = `距离${config.event}还有`;
-      document.getElementById('target-date').innerText = `目标日: ${config.date}`;
-      
-      const target = new Date(config.date);
+
+      const target = getNextPaydayDate(config.payday);
+      document.getElementById('target-date').innerText = `目标日: ${formatDate(target)}`;
+
       const now = new Date();
-      target.setHours(0,0,0,0);
-      now.setHours(0,0,0,0);
-      
+      now.setHours(0, 0, 0, 0);
+
       const diffTime = target - now;
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
+
       document.getElementById('days-left').innerText = diffDays > 0 ? diffDays : 0;
     }
 
@@ -88,6 +254,28 @@
         render();
       }
     }, 60000);
+
+    // 设置按钮
+    document.getElementById('settings-btn').addEventListener('click', () => {
+      document.getElementById('payday-input').value = config.payday;
+      document.getElementById('settings-overlay').classList.add('show');
+    });
+
+    document.getElementById('btn-cancel').addEventListener('click', () => {
+      document.getElementById('settings-overlay').classList.remove('show');
+    });
+
+    document.getElementById('btn-save').addEventListener('click', () => {
+      const val = parseInt(document.getElementById('payday-input').value, 10);
+      if (isNaN(val) || val < 1 || val > 31) {
+        alert('请输入 1-31 之间的日期');
+        return;
+      }
+      config.payday = val;
+      saveConfig();
+      document.getElementById('settings-overlay').classList.remove('show');
+      render();
+    });
 
     loadConfig();
   </script>
