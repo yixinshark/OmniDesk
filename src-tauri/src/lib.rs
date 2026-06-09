@@ -206,12 +206,72 @@ fn open_url(app_handle: tauri::AppHandle, url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn fetch_proxy(url: String, token: Option<String>) -> Result<String, String> {
+fn open_ssh(host: String, user: String, port: u16, password: Option<String>, terminal: Option<String>) -> Result<(), String> {
+    // 构建 SSH 命令
+    let ssh_args = if port == 22 {
+        format!("ssh {}@{}", user, host)
+    } else {
+        format!("ssh -p {} {}@{}", port, user, host)
+    };
+
+    // 如果有密码，尝试用 sshpass
+    let full_cmd = if let Some(ref pw) = password {
+        if !pw.is_empty() {
+            format!("sshpass -p '{}' {}", pw.replace('\'', "'\\''"), ssh_args)
+        } else {
+            ssh_args
+        }
+    } else {
+        ssh_args
+    };
+
+    // 用户自定义终端
+    if let Some(ref term) = terminal {
+        if !term.is_empty() {
+            let args = vec!["-e", "bash", "-c", &full_cmd];
+            return std::process::Command::new(term)
+                .args(&args)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("启动 {} 失败: {}", term, e));
+        }
+    }
+
+    // 自动检测终端
+    let terminals: Vec<(&str, Vec<&str>)> = vec![
+        ("deepin-terminal", vec!["-e", "bash", "-c", &full_cmd]),
+        ("wezterm", vec!["start", "--", "bash", "-c", &full_cmd]),
+        ("gnome-terminal", vec!["--", "bash", "-c", &full_cmd]),
+        ("konsole", vec!["-e", "bash", "-c", &full_cmd]),
+        ("xfce4-terminal", vec!["-e", &full_cmd]),
+        ("tilix", vec!["-e", &full_cmd]),
+        ("mate-terminal", vec!["-e", &full_cmd]),
+        ("alacritty", vec!["-e", "bash", "-c", &full_cmd]),
+        ("kitty", vec!["-e", "bash", "-c", &full_cmd]),
+        ("xterm", vec!["-e", &full_cmd]),
+    ];
+
+    for (term, args) in &terminals {
+        if std::process::Command::new(term).args(args).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err("未找到可用的终端模拟器，请在设置中配置终端路径".to_string())
+}
+
+#[tauri::command]
+async fn fetch_proxy(url: String, token: Option<String>, headers: Option<std::collections::HashMap<String, String>>) -> Result<String, String> {
     let client = reqwest::Client::new();
     let mut req = client.get(&url).header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     if let Some(t) = token {
         if !t.is_empty() {
             req = req.header("Authorization", format!("Bearer {}", t));
+        }
+    }
+    if let Some(h) = headers {
+        for (k, v) in h {
+            req = req.header(&k, &v);
         }
     }
     req.send()
@@ -484,7 +544,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            save_layout, load_layout, widget_read_file, widget_write_file, open_url, fetch_proxy, check_and_cache_video,
+            save_layout, load_layout, widget_read_file, widget_write_file, open_url, open_ssh, fetch_proxy, check_and_cache_video,
             list_available_widgets, get_top_processes, kill_process, read_config, write_config, check_and_cache_image,
             list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url,
             save_ai_keys, get_ai_keys, fetch_ai_quota

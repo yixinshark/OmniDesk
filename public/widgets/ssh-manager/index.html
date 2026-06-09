@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SSH 连接</title>
+  <script src="/widget-sdk.js"></script>
+  <style>
+    body {
+      margin: 0; padding: 14px 16px; height: 100vh;
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, rgba(20,25,35,0.4), rgba(40,50,65,0.4));
+      color: rgba(255,255,255,0.9);
+      display: flex; flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 10px; flex-shrink: 0;
+    }
+    .header-title {
+      font-size: 0.85rem; font-weight: 500;
+      color: rgba(255,255,255,0.6);
+      flex: 1;
+    }
+    .header-btn {
+      width: 26px; height: 26px;
+      border-radius: 6px; border: none;
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.6);
+      font-size: 14px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .header-btn:hover { background: rgba(255,255,255,0.2); color: rgba(255,255,255,0.9); }
+
+    .conn-list {
+      display: flex; flex-direction: column; gap: 4px;
+      overflow-y: auto; flex: 1; min-height: 0;
+      padding-right: 2px;
+    }
+    .conn-list::-webkit-scrollbar { width: 4px; }
+    .conn-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+    .conn-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 8px;
+      background: rgba(255,255,255,0.03);
+      cursor: pointer; transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .conn-item:hover { background: rgba(255,255,255,0.08); }
+
+    .conn-icon {
+      width: 30px; height: 30px; border-radius: 6px;
+      background: rgba(255,255,255,0.08);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; flex-shrink: 0;
+    }
+
+    .conn-info { flex: 1; min-width: 0; }
+    .conn-alias {
+      font-size: 0.8rem; font-weight: 500;
+      color: rgba(255,255,255,0.9);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .conn-addr {
+      font-size: 0.68rem; color: rgba(255,255,255,0.4);
+      font-family: monospace; margin-top: 1px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .conn-pw-indicator {
+      font-size: 0.6rem; color: rgba(255,255,255,0.25);
+      margin-left: 4px;
+    }
+
+    .conn-del {
+      width: 22px; height: 22px; border-radius: 4px;
+      border: none; background: transparent;
+      color: rgba(255,255,255,0.15); font-size: 11px;
+      cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      transition: all 0.15s; flex-shrink: 0;
+      opacity: 0;
+    }
+    .conn-item:hover .conn-del { opacity: 1; }
+    .conn-del:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+
+    .empty {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.3); font-size: 0.78rem; gap: 8px;
+    }
+    .empty-icon { font-size: 2rem; opacity: 0.5; }
+
+    /* 弹窗通用 */
+    .overlay {
+      display: none; position: absolute; inset: 0;
+      background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+      z-index: 10; flex-direction: column;
+      align-items: center; justify-content: center; padding: 16px;
+    }
+    .overlay.show { display: flex; }
+
+    .form-title {
+      font-size: 0.82rem; font-weight: 600;
+      color: rgba(255,255,255,0.9); margin-bottom: 12px;
+    }
+    .form-row {
+      display: flex; gap: 8px; width: 100%; margin-bottom: 7px;
+    }
+    .form-field { flex: 1; display: flex; flex-direction: column; }
+    .form-field.wide { flex: 2; }
+    .form-label {
+      font-size: 0.62rem; color: rgba(255,255,255,0.4);
+      margin-bottom: 3px;
+    }
+    .form-input {
+      padding: 5px 8px; border-radius: 5px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.9);
+      font-size: 0.75rem; outline: none;
+      transition: border-color 0.2s;
+      font-family: monospace;
+    }
+    .form-input:focus { border-color: #60a5fa; }
+    .form-input::placeholder { color: rgba(255,255,255,0.2); }
+    .form-hint {
+      font-size: 0.58rem; color: rgba(255,255,255,0.25);
+      margin-top: 2px;
+    }
+
+    .form-actions {
+      display: flex; gap: 8px; margin-top: 10px;
+    }
+    .form-actions button {
+      padding: 5px 18px; border-radius: 5px;
+      border: none; font-size: 0.72rem;
+      font-weight: 500; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-save { background: #3b82f6; color: #fff; }
+    .btn-save:hover { background: #2563eb; }
+    .btn-cancel { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
+    .btn-cancel:hover { background: rgba(255,255,255,0.2); }
+
+    .toast {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.85); color: #fff;
+      padding: 5px 12px; border-radius: 6px;
+      font-size: 0.72rem; z-index: 20;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+
+    /* 设置页 */
+    .settings-row {
+      width: 100%; margin-bottom: 10px;
+    }
+    .settings-row .form-field { width: 100%; }
+    .settings-row .form-input { width: 100%; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-title">SSH 连接</div>
+    <button class="header-btn" id="btn-add" title="添加服务器">＋</button>
+    <button class="header-btn" id="btn-settings" title="设置">⚙</button>
+  </div>
+
+  <div class="conn-list" id="conn-list">
+    <div class="empty">
+      <div class="empty-icon">🖥️</div>
+      <div>点击 ＋ 添加服务器</div>
+    </div>
+  </div>
+
+  <!-- 添加/编辑弹窗 -->
+  <div class="overlay" id="form-overlay">
+    <div class="form-title" id="form-title">添加服务器</div>
+    <div class="form-row">
+      <div class="form-field wide">
+        <div class="form-label">别名</div>
+        <input class="form-input" id="f-alias" placeholder="web-server-01">
+      </div>
+      <div class="form-field">
+        <div class="form-label">端口</div>
+        <input class="form-input" id="f-port" type="number" placeholder="22" value="22">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-field">
+        <div class="form-label">主机</div>
+        <input class="form-input" id="f-host" placeholder="192.168.1.100">
+      </div>
+      <div class="form-field">
+        <div class="form-label">用户名</div>
+        <input class="form-input" id="f-user" placeholder="root">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-field">
+        <div class="form-label">密码（可选）</div>
+        <input class="form-input" id="f-password" type="password" placeholder="留空则交互输入">
+        <div class="form-hint">需要系统安装 sshpass</div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-cancel" id="btn-form-cancel">取消</button>
+      <button class="btn-save" id="btn-form-save">保存</button>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="overlay" id="settings-overlay">
+    <div class="form-title">SSH 连接设置</div>
+    <div class="settings-row">
+      <div class="form-field">
+        <div class="form-label">终端路径（留空自动检测）</div>
+        <input class="form-input" id="s-terminal" placeholder="/usr/bin/deepin-terminal">
+        <div class="form-hint">本机已检测到: deepin-terminal, wezterm</div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-cancel" id="btn-settings-cancel">取消</button>
+      <button class="btn-save" id="btn-settings-save">保存</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const CONN_FILE = 'ssh_connections.json';
+    const SETTINGS_FILE = 'ssh_settings.json';
+    let connections = [];
+    let settings = { terminal: '' };
+    let editingId = null;
+
+    function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
+    async function loadConfig() {
+      try {
+        const data = await window.__widgetBridge.invoke('widget_read_file', { filename: CONN_FILE });
+        if (data) connections = JSON.parse(data);
+      } catch { connections = []; }
+      try {
+        const data = await window.__widgetBridge.invoke('widget_read_file', { filename: SETTINGS_FILE });
+        if (data) settings = { ...settings, ...JSON.parse(data) };
+      } catch {}
+      render();
+    }
+
+    function saveConns() {
+      window.__widgetBridge.invoke('widget_write_file', { filename: CONN_FILE, content: JSON.stringify(connections) });
+    }
+
+    function saveSettings() {
+      window.__widgetBridge.invoke('widget_write_file', { filename: SETTINGS_FILE, content: JSON.stringify(settings) });
+    }
+
+    function render() {
+      const list = document.getElementById('conn-list');
+      if (connections.length === 0) {
+        list.innerHTML = '<div class="empty"><div class="empty-icon">🖥️</div><div>点击 ＋ 添加服务器</div></div>';
+        return;
+      }
+      list.innerHTML = '';
+      connections.forEach(conn => {
+        const item = document.createElement('div');
+        item.className = 'conn-item';
+        item.addEventListener('click', () => connectSSH(conn));
+
+        const portStr = conn.port && conn.port !== 22 ? ` -p ${conn.port}` : '';
+        const pwBadge = conn.password ? '<span class="conn-pw-indicator">🔑</span>' : '';
+
+        const iconDiv = document.createElement('div');
+        iconDiv.className = 'conn-icon';
+        iconDiv.textContent = '🖥️';
+
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'conn-info';
+        infoDiv.innerHTML = `<div class="conn-alias">${conn.alias || conn.host}${pwBadge}</div><div class="conn-addr">${conn.user}@${conn.host}${portStr}</div>`;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'conn-del';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteConn(conn.id); });
+
+        item.appendChild(iconDiv);
+        item.appendChild(infoDiv);
+        item.appendChild(delBtn);
+        list.appendChild(item);
+      });
+    }
+
+    async function connectSSH(conn) {
+      try {
+        await window.__widgetBridge.invoke('open_ssh', {
+          host: conn.host,
+          user: conn.user,
+          port: conn.port || 22,
+          password: conn.password || null,
+          terminal: settings.terminal || null
+        });
+        showToast('正在连接 ' + (conn.alias || conn.host) + '...');
+      } catch (e) {
+        showToast('连接失败: ' + e);
+      }
+    }
+
+    function deleteConn(id) {
+      connections = connections.filter(c => c.id !== id);
+      saveConns();
+      render();
+    }
+
+    // --- 添加/编辑表单 ---
+    function showForm(conn) {
+      editingId = conn ? conn.id : null;
+      document.getElementById('form-title').innerText = conn ? '编辑服务器' : '添加服务器';
+      document.getElementById('f-alias').value = conn ? conn.alias : '';
+      document.getElementById('f-host').value = conn ? conn.host : '';
+      document.getElementById('f-user').value = conn ? conn.user : '';
+      document.getElementById('f-port').value = conn ? (conn.port || 22) : 22;
+      document.getElementById('f-password').value = conn && conn.password ? conn.password : '';
+      document.getElementById('form-overlay').classList.add('show');
+      document.getElementById('f-alias').focus();
+    }
+
+    function hideForm() {
+      document.getElementById('form-overlay').classList.remove('show');
+      editingId = null;
+    }
+
+    function saveForm() {
+      const alias = document.getElementById('f-alias').value.trim();
+      const host = document.getElementById('f-host').value.trim();
+      const user = document.getElementById('f-user').value.trim();
+      const port = parseInt(document.getElementById('f-port').value, 10) || 22;
+      const password = document.getElementById('f-password').value;
+
+      if (!host || !user) { showToast('主机和用户名不能为空'); return; }
+
+      const entry = { id: editingId || genId(), alias: alias || host, host, user, port };
+      if (password) entry.password = password;
+
+      if (editingId) {
+        const idx = connections.findIndex(c => c.id === editingId);
+        if (idx >= 0) connections[idx] = entry;
+      } else {
+        connections.push(entry);
+      }
+
+      saveConns();
+      hideForm();
+      render();
+    }
+
+    // --- 设置页 ---
+    function showSettings() {
+      document.getElementById('s-terminal').value = settings.terminal || '';
+      document.getElementById('settings-overlay').classList.add('show');
+    }
+
+    function hideSettings() {
+      document.getElementById('settings-overlay').classList.remove('show');
+    }
+
+    function saveSettingsForm() {
+      settings.terminal = document.getElementById('s-terminal').value.trim();
+      saveSettings();
+      hideSettings();
+      showToast('设置已保存');
+    }
+
+    // 事件绑定
+    document.getElementById('btn-add').addEventListener('click', () => showForm(null));
+    document.getElementById('btn-settings').addEventListener('click', showSettings);
+    document.getElementById('btn-form-cancel').addEventListener('click', hideForm);
+    document.getElementById('btn-form-save').addEventListener('click', saveForm);
+    document.getElementById('btn-settings-cancel').addEventListener('click', hideSettings);
+    document.getElementById('btn-settings-save').addEventListener('click', saveSettingsForm);
+
+    // Enter 键提交
+    document.querySelectorAll('#form-overlay .form-input').forEach(input => {
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') saveForm(); });
+    });
+    document.querySelectorAll('#settings-overlay .form-input').forEach(input => {
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') saveSettingsForm(); });
+    });
+
+    loadConfig();
+  </script>
+</body>
+</html>
