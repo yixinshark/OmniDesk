@@ -548,6 +548,264 @@ fn send_notification(app_handle: tauri::AppHandle, title: String, body: String) 
     Ok(())
 }
 
+// --- XDG 桌面文件 / 应用启动器 ---
+
+#[derive(Serialize)]
+struct DesktopItem {
+    name: String,         // 显示名（locale 优先）
+    kind: String,         // "app" | "file" | "dir"
+    path: String,         // 真实绝对路径（软链已解析）
+    icon: Option<String>, // data URL（svg/png base64），无则前端用 emoji 兜底
+}
+
+/// 当前图标主题：优先 DDE，再 GNOME，兜底 hicolor
+fn current_icon_theme() -> String {
+    let try_gsettings = |schema: &str, key: &str| -> Option<String> {
+        let out = std::process::Command::new("gsettings")
+            .args(["get", schema, key])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&out.stdout);
+        let s = s.trim().trim_matches('\'').trim_matches('"').trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    };
+    try_gsettings("com.deepin.dde.appearance", "icon-theme")
+        .or_else(|| try_gsettings("org.gnome.desktop.interface", "icon-theme"))
+        .unwrap_or_else(|| "hicolor".to_string())
+}
+
+/// 从 LANG / LC_MESSAGES 推断 locale 键，如 "zh_CN.UTF-8" -> ["zh_CN", "zh"]
+fn current_locale_keys() -> Vec<String> {
+    let lang = std::env::var("LC_MESSAGES")
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default();
+    let lang = lang.split('.').next().unwrap_or("").to_string();
+    let mut keys = Vec::new();
+    if !lang.is_empty() {
+        keys.push(lang.clone());
+        if let Some((base, _)) = lang.split_once('_') {
+            keys.push(base.to_string());
+        }
+    }
+    keys
+}
+
+/// 轻量解析 .desktop：只读 [Desktop Entry] 组，遇到下一个 [ 组即停（文件常有数百行翻译）。
+/// 返回 (显示名, 图标名)。
+fn parse_desktop_entry(path: &std::path::Path, locale_keys: &[String]) -> Option<(String, String)> {
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut in_entry = false;
+    let mut name_default = String::new();
+    let mut name_localized: HashMap<String, String> = HashMap::new();
+    let mut icon = String::new();
+
+    for line in reader.lines() {
+        let line = match line { Ok(l) => l, Err(_) => break };
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            if trimmed == "[Desktop Entry]" {
+                in_entry = true;
+                continue;
+            } else if in_entry {
+                break; // 进入下一个组（如 [Desktop Action ...]），停止
+            } else {
+                continue;
+            }
+        }
+        if !in_entry || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, val)) = trimmed.split_once('=') {
+            let key = key.trim();
+            let val = val.trim();
+            if key == "Name" {
+                name_default = val.to_string();
+            } else if key.starts_with("Name[") && key.ends_with(']') {
+                let loc = &key[5..key.len() - 1];
+                name_localized.insert(loc.to_string(), val.to_string());
+            } else if key == "Icon" {
+                icon = val.to_string();
+            }
+        }
+    }
+
+    let name = locale_keys
+        .iter()
+        .find_map(|k| name_localized.get(k).cloned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(name_default);
+    Some((name, icon))
+}
+
+/// 普通文件按扩展名映射到通用 MIME 图标名（freedesktop 命名）
+fn mime_icon_for(path: &std::path::Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let by_ext = match ext.as_str() {
+        "txt" | "md" | "log" | "csv" | "json" | "xml" | "yaml" | "yml" | "rs" | "c" | "h"
+        | "cpp" | "py" | "js" | "ts" | "sh" | "toml" | "ini" | "conf" | "lua" => Some("text-x-generic"),
+        "pdf" => Some("application-pdf"),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" | "ico" => Some("image-x-generic"),
+        "mp4" | "mkv" | "mov" | "avi" | "webm" | "flv" => Some("video-x-generic"),
+        "mp3" | "wav" | "flac" | "ogg" | "aac" => Some("audio-x-generic"),
+        "zip" | "tar" | "gz" | "xz" | "bz2" | "7z" | "rar" | "deb" | "rpm" => Some("package-x-generic"),
+        "doc" | "docx" | "odt" => Some("x-office-document"),
+        "xls" | "xlsx" | "ods" => Some("x-office-spreadsheet"),
+        "ppt" | "pptx" | "odp" => Some("x-office-presentation"),
+        _ => None,
+    };
+    if let Some(n) = by_ext {
+        return n.to_string();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
+                return "application-x-executable".to_string();
+            }
+        }
+    }
+    "text-x-generic".to_string()
+}
+
+/// 图标名 -> data URL。绝对路径直接读；否则按主题 + hicolor 回退解析。
+fn resolve_icon(icon: &str, theme: &str) -> Option<String> {
+    if icon.is_empty() {
+        return None;
+    }
+    let icon_path = if icon.starts_with('/') {
+        let p = std::path::PathBuf::from(icon);
+        if p.exists() { Some(p) } else { None }
+    } else {
+        freedesktop_icons::lookup(icon)
+            .with_size(48)
+            .with_theme(theme)
+            .find()
+            .or_else(|| freedesktop_icons::lookup(icon).with_size(48).find())
+    };
+    let p = icon_path?;
+    let bytes = std::fs::read(&p).ok()?;
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let mime = match ext.as_str() {
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "xpm" => "image/x-xpixmap",
+        _ => "image/png",
+    };
+    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
+}
+
+#[tauri::command]
+fn list_desktop_entries() -> Result<Vec<DesktopItem>, String> {
+    let desktop = dirs_next::home_dir()
+        .ok_or("无法获取 home 目录")?
+        .join("Desktop");
+    if !desktop.exists() {
+        return Ok(Vec::new());
+    }
+
+    let theme = current_icon_theme();
+    let locale_keys = current_locale_keys();
+    let mut items = Vec::new();
+
+    for entry in std::fs::read_dir(&desktop).map_err(|e| e.to_string())? {
+        let entry = match entry { Ok(e) => e, Err(_) => continue };
+        let link_path = entry.path();
+        let file_name = link_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if file_name.starts_with('.') {
+            continue; // 跳过隐藏文件
+        }
+
+        // 解析软链到真实路径（~/Desktop 多为指向 /usr/share/applications 的软链）
+        let real = std::fs::canonicalize(&link_path).unwrap_or_else(|_| link_path.clone());
+        let is_dir = real.is_dir();
+        let is_desktop = real.extension().map(|e| e == "desktop").unwrap_or(false);
+
+        let (name, kind, icon_name): (String, &str, Option<String>) = if is_desktop {
+            let parsed = parse_desktop_entry(&real, &locale_keys);
+            let nm = parsed
+                .as_ref()
+                .map(|(n, _)| n.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    real.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| file_name.clone())
+                });
+            let ic = parsed
+                .and_then(|(_, i)| if i.is_empty() { None } else { Some(i) });
+            (nm, "app", ic)
+        } else if is_dir {
+            (file_name.clone(), "dir", Some("folder".to_string()))
+        } else {
+            (file_name.clone(), "file", Some(mime_icon_for(&real)))
+        };
+
+        let icon = icon_name.and_then(|n| resolve_icon(&n, &theme));
+        items.push(DesktopItem {
+            name,
+            kind: kind.to_string(),
+            path: real.to_string_lossy().to_string(),
+            icon,
+        });
+    }
+
+    // 排序：文件夹 > 应用 > 文件，组内按名称
+    items.sort_by(|a, b| {
+        let rank = |k: &str| match k { "dir" => 0, "app" => 1, _ => 2 };
+        rank(a.kind.as_str())
+            .cmp(&rank(b.kind.as_str()))
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(items)
+}
+
+#[tauri::command]
+fn launch_desktop_entry(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let is_desktop = p.extension().map(|e| e == "desktop").unwrap_or(false);
+
+    if is_desktop {
+        // gio launch 会正确处理 Exec 字段码(%F/%U)、Terminal=、DBus 激活、URI(computer:///)
+        if std::process::Command::new("gio")
+            .args(["launch", path.as_str()])
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        // 回退：gtk-launch <app-id>
+        if let Some(id) = p.file_stem().map(|s| s.to_string_lossy().to_string()) {
+            if !id.is_empty()
+                && std::process::Command::new("gtk-launch").arg(&id).spawn().is_ok()
+            {
+                return Ok(());
+            }
+        }
+        return Err(format!("无法启动应用：{}", path));
+    }
+
+    // 普通文件 / 文件夹：交给默认程序
+    std::process::Command::new("xdg-open")
+        .arg(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开失败：{}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix GBM EGL display initialization error on Linux
@@ -559,7 +817,8 @@ pub fn run() {
             save_layout, load_layout, widget_read_file, widget_write_file, open_url, open_ssh, fetch_proxy, check_and_cache_video,
             list_available_widgets, get_top_processes, kill_process, read_config, write_config, check_and_cache_image,
             list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url,
-            save_ai_keys, get_ai_keys, fetch_ai_quota, send_notification
+            save_ai_keys, get_ai_keys, fetch_ai_quota, send_notification,
+            list_desktop_entries, launch_desktop_entry
         ])
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())

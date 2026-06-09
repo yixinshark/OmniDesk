@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>桌面文件</title>
+  <script src="/widget-sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 10px; height: 100vh;
+      display: flex; flex-direction: column;
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: rgba(0, 0, 0, 0.15);
+      color: #fff;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px; flex-shrink: 0;
+    }
+    .title { font-size: 0.85rem; font-weight: 600; color: rgba(255,255,255,0.9); letter-spacing: 0.5px; }
+    .refresh {
+      border: none; background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.85);
+      width: 26px; height: 26px; border-radius: 8px; cursor: pointer;
+      font-size: 0.9rem; line-height: 1; transition: all 0.15s;
+    }
+    .refresh:hover { background: rgba(255,255,255,0.2); }
+    .refresh:active { transform: scale(0.92); }
+
+    .grid {
+      flex: 1; overflow-y: auto; overflow-x: hidden;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+      grid-auto-rows: min-content;
+      gap: 6px;
+      padding-right: 2px;
+    }
+    .grid::-webkit-scrollbar { width: 6px; }
+    .grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+
+    .item {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 6px 2px; border-radius: 10px; cursor: pointer;
+      transition: background 0.12s, transform 0.12s;
+      user-select: none;
+    }
+    .item:hover { background: rgba(255,255,255,0.10); }
+    .item.selected { background: rgba(255,255,255,0.22); }
+    .item:active { transform: scale(0.96); }
+
+    .icon {
+      width: 40px; height: 40px; margin-bottom: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.9rem; line-height: 1;
+    }
+    .icon img { width: 40px; height: 40px; object-fit: contain; display: block; }
+
+    .label {
+      font-size: 0.68rem; line-height: 1.2; text-align: center;
+      width: 100%;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; word-break: break-all;
+      color: rgba(255,255,255,0.92);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    }
+
+    .state {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.55); font-size: 0.78rem; text-align: center; padding: 0 10px;
+    }
+    .toast {
+      position: absolute; left: 10px; right: 10px; bottom: 10px;
+      background: rgba(180,40,40,0.92); color: #fff;
+      font-size: 0.72rem; padding: 6px 10px; border-radius: 8px;
+      opacity: 0; transition: opacity 0.2s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">🗂️ 桌面文件</div>
+    <button class="refresh" id="refresh" title="刷新">⟳</button>
+  </header>
+  <div class="grid" id="grid">
+    <div class="state">加载中…</div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const bridge = window.__widgetBridge;
+    const grid = document.getElementById('grid');
+    const toastEl = document.getElementById('toast');
+    let lastJson = "";
+    let toastTimer = null;
+
+    function emojiFor(kind) {
+      return kind === 'dir' ? '📁' : kind === 'app' ? '📦' : '📄';
+    }
+
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+    }
+
+    function showState(text) {
+      grid.innerHTML = '';
+      const d = document.createElement('div');
+      d.className = 'state';
+      d.textContent = text;
+      grid.appendChild(d);
+    }
+
+    function render(items) {
+      grid.innerHTML = '';
+      if (!items || items.length === 0) {
+        showState('桌面空空如也');
+        return;
+      }
+      for (const it of items) {
+        const el = document.createElement('div');
+        el.className = 'item';
+        el.title = it.name;
+
+        const ic = document.createElement('div');
+        ic.className = 'icon';
+        if (it.icon) {
+          const img = document.createElement('img');
+          img.src = it.icon;
+          img.alt = '';
+          img.onerror = () => { ic.textContent = emojiFor(it.kind); };
+          ic.appendChild(img);
+        } else {
+          ic.textContent = emojiFor(it.kind);
+        }
+
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = it.name;
+
+        el.appendChild(ic);
+        el.appendChild(label);
+
+        el.addEventListener('click', () => {
+          document.querySelectorAll('.item.selected').forEach(n => n.classList.remove('selected'));
+          el.classList.add('selected');
+        });
+        el.addEventListener('dblclick', () => {
+          bridge.invoke('launch_desktop_entry', { path: it.path })
+            .catch(err => toast('打开失败：' + err));
+        });
+
+        grid.appendChild(el);
+      }
+    }
+
+    async function load() {
+      try {
+        const items = await bridge.invoke('list_desktop_entries');
+        const json = JSON.stringify(items);
+        if (json === lastJson) return; // 无变化则不重绘，避免闪烁
+        lastJson = json;
+        render(items);
+      } catch (e) {
+        lastJson = "";
+        showState('读取桌面失败');
+        toast(String(e));
+      }
+    }
+
+    document.getElementById('refresh').addEventListener('click', () => {
+      lastJson = ""; // 强制重绘
+      load();
+    });
+
+    load();
+    setInterval(load, 5000); // 轻量轮询，自动同步新增/删除
+  </script>
+</body>
+</html>
