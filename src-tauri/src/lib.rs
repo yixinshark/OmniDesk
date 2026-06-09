@@ -554,7 +554,8 @@ fn send_notification(app_handle: tauri::AppHandle, title: String, body: String) 
 struct DesktopItem {
     name: String,         // 显示名（locale 优先）
     kind: String,         // "app" | "file" | "dir"
-    path: String,         // 真实绝对路径（软链已解析）
+    path: String,         // ~/Desktop 里的条目本身（软链/文件/夹）—— 文件操作 + 显示
+    launch: String,       // 启动目标：.desktop→真实文件；file/dir = path
     icon: Option<String>, // data URL（svg/png base64），无则前端用 emoji 兜底
 }
 
@@ -677,11 +678,51 @@ fn mime_icon_for(path: &std::path::Path) -> String {
     "text-x-generic".to_string()
 }
 
-/// 图标名 -> data URL。绝对路径直接读；否则按主题 + hicolor 回退解析。
+/// 图片文件 -> data URL（原图内联，由前端 CSS 缩放）。超过 max_bytes 返回 None 走通用图标。
+fn image_data_url_capped(path: &std::path::Path, max_bytes: u64) -> Option<String> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        _ => return None,
+    };
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.len() == 0 || meta.len() > max_bytes {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
+}
+
+// 图标名 -> dataURL 的进程级缓存（最贵的是主题目录遍历）
+static ICON_CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Option<String>>>> =
+    std::sync::OnceLock::new();
+
+/// 图标名 -> data URL（带缓存）。绝对路径直接读；否则按主题 + hicolor 回退解析。
 fn resolve_icon(icon: &str, theme: &str) -> Option<String> {
     if icon.is_empty() {
         return None;
     }
+    let key = format!("{}@{}", icon, theme);
+    let cache = ICON_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    if let Ok(map) = cache.lock() {
+        if let Some(v) = map.get(&key) {
+            return v.clone();
+        }
+    }
+    let result = resolve_icon_uncached(icon, theme);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, result.clone());
+    }
+    result
+}
+
+fn resolve_icon_uncached(icon: &str, theme: &str) -> Option<String> {
     let icon_path = if icon.starts_with('/') {
         let p = std::path::PathBuf::from(icon);
         if p.exists() { Some(p) } else { None }
@@ -719,7 +760,7 @@ fn list_desktop_entries() -> Result<Vec<DesktopItem>, String> {
 
     for entry in std::fs::read_dir(&desktop).map_err(|e| e.to_string())? {
         let entry = match entry { Ok(e) => e, Err(_) => continue };
-        let link_path = entry.path();
+        let link_path = entry.path(); // ~/Desktop 里的条目本身（可能是软链）
         let file_name = link_path
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -728,36 +769,47 @@ fn list_desktop_entries() -> Result<Vec<DesktopItem>, String> {
             continue; // 跳过隐藏文件
         }
 
-        // 解析软链到真实路径（~/Desktop 多为指向 /usr/share/applications 的软链）
-        let real = std::fs::canonicalize(&link_path).unwrap_or_else(|_| link_path.clone());
-        let is_dir = real.is_dir();
-        let is_desktop = real.extension().map(|e| e == "desktop").unwrap_or(false);
+        // 跟随软链判断类型；但文件操作用的 path 仍是 link_path 本身（避免误删系统文件）
+        let is_dir = link_path.is_dir();
+        let is_desktop = link_path.extension().map(|e| e == "desktop").unwrap_or(false);
 
-        let (name, kind, icon_name): (String, &str, Option<String>) = if is_desktop {
-            let parsed = parse_desktop_entry(&real, &locale_keys);
+        let (name, kind, icon): (String, &str, Option<String>) = if is_desktop {
+            let parsed = parse_desktop_entry(&link_path, &locale_keys);
             let nm = parsed
                 .as_ref()
                 .map(|(n, _)| n.clone())
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| {
-                    real.file_stem()
+                    link_path
+                        .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| file_name.clone())
                 });
             let ic = parsed
-                .and_then(|(_, i)| if i.is_empty() { None } else { Some(i) });
+                .and_then(|(_, i)| if i.is_empty() { None } else { Some(i) })
+                .and_then(|n| resolve_icon(&n, &theme));
             (nm, "app", ic)
         } else if is_dir {
-            (file_name.clone(), "dir", Some("folder".to_string()))
+            (file_name.clone(), "dir", resolve_icon("folder", &theme))
         } else {
-            (file_name.clone(), "file", Some(mime_icon_for(&real)))
+            // 图片优先显示缩略图，否则走通用 MIME 图标
+            let ic = image_data_url_capped(&link_path, 2 * 1024 * 1024)
+                .or_else(|| resolve_icon(&mime_icon_for(&link_path), &theme));
+            (file_name.clone(), "file", ic)
         };
 
-        let icon = icon_name.and_then(|n| resolve_icon(&n, &theme));
+        // 启动目标：.desktop 解析软链到真实 .desktop，其余即条目本身
+        let launch = if is_desktop {
+            std::fs::canonicalize(&link_path).unwrap_or_else(|_| link_path.clone())
+        } else {
+            link_path.clone()
+        };
+
         items.push(DesktopItem {
             name,
             kind: kind.to_string(),
-            path: real.to_string_lossy().to_string(),
+            path: link_path.to_string_lossy().to_string(),
+            launch: launch.to_string_lossy().to_string(),
             icon,
         });
     }
@@ -806,6 +858,70 @@ fn launch_desktop_entry(path: String) -> Result<(), String> {
         .map_err(|e| format!("打开失败：{}", e))
 }
 
+#[tauri::command]
+fn trash_path(path: String) -> Result<(), String> {
+    // 移到回收站（可恢复）
+    std::process::Command::new("gio")
+        .args(["trash", path.as_str()])
+        .status()
+        .map_err(|e| format!("移到回收站失败：{}", e))
+        .and_then(|s| if s.success() { Ok(()) } else { Err("移到回收站失败".to_string()) })
+}
+
+#[tauri::command]
+fn delete_path(path: String) -> Result<(), String> {
+    // 永久删除（不可恢复）。symlink_metadata 不跟随软链 -> 软链/文件只删自身，不动目标。
+    let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+    if meta.file_type().is_dir() {
+        std::fs::remove_dir_all(&path).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    // 在文件管理器中定位
+    if std::process::Command::new("dde-file-manager")
+        .args(["--show-item", path.as_str()])
+        .spawn()
+        .is_ok()
+    {
+        return Ok(());
+    }
+    // 回退：打开父目录
+    let parent = std::path::Path::new(&path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    std::process::Command::new("xdg-open")
+        .arg(&parent)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开失败：{}", e))
+}
+
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use arboard::SetExtLinux;
+        // X11 下需保持选区所有权：独立线程内 set().wait() 持续供给，直到被其它程序替换
+        std::thread::spawn(move || {
+            if let Ok(mut cb) = arboard::Clipboard::new() {
+                let _ = cb.set().wait().text(text);
+            }
+        });
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        arboard::Clipboard::new()
+            .and_then(|mut cb| cb.set_text(text))
+            .map_err(|e| e.to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix GBM EGL display initialization error on Linux
@@ -818,7 +934,8 @@ pub fn run() {
             list_available_widgets, get_top_processes, kill_process, read_config, write_config, check_and_cache_image,
             list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url,
             save_ai_keys, get_ai_keys, fetch_ai_quota, send_notification,
-            list_desktop_entries, launch_desktop_entry
+            list_desktop_entries, launch_desktop_entry,
+            trash_path, delete_path, reveal_path, copy_text
         ])
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -918,6 +1035,32 @@ pub fn run() {
                         eprintln!("Failed to mount to desktop: {}", e);
                     }
                 }
+            }
+
+            // 监听 ~/Desktop 变化，通知 desktop-files widget 即时刷新（替代高频轮询）
+            {
+                let h = app.handle().clone();
+                std::thread::spawn(move || {
+                    use notify::Watcher;
+                    let desktop = match dirs_next::home_dir() {
+                        Some(home) => home.join("Desktop"),
+                        None => return,
+                    };
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| { let _ = tx.send(res); }) {
+                        Ok(w) => w,
+                        Err(_) => return,
+                    };
+                    if watcher.watch(&desktop, notify::RecursiveMode::NonRecursive).is_err() {
+                        return;
+                    }
+                    // rx 循环保活 watcher；每个事件通知前端（前端自己去抖）
+                    for ev in rx {
+                        if ev.is_ok() {
+                            let _ = h.emit("desktop-changed", ());
+                        }
+                    }
+                });
             }
 
             let app_handle = app.handle().clone();

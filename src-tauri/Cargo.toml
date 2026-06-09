@@ -31,4 +31,6 @@ http = "1"
 dirs-next = "2"
 libc = "0.2.186"
 freedesktop-icons = "0.2"
+notify = "6"
+arboard = "3"
 
