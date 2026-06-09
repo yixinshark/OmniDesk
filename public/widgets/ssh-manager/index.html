@@ -48,11 +48,14 @@
     .conn-item {
       display: flex; align-items: center; gap: 10px;
       padding: 8px 10px; border-radius: 8px;
-      background: rgba(255,255,255,0.03);
-      cursor: pointer; transition: background 0.15s;
+      background: rgba(255,255,255,0.05);
+      cursor: pointer; transition: all 0.15s;
       flex-shrink: 0;
     }
-    .conn-item:hover { background: rgba(255,255,255,0.08); }
+    .conn-item:hover {
+      background: rgba(255,255,255,0.12);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
 
     .conn-icon {
       width: 30px; height: 30px; border-radius: 6px;
@@ -68,7 +71,7 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .conn-addr {
-      font-size: 0.68rem; color: rgba(255,255,255,0.4);
+      font-size: 0.68rem; color: rgba(255,255,255,0.55);
       font-family: monospace; margin-top: 1px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
@@ -79,15 +82,13 @@
 
     .conn-del {
       width: 22px; height: 22px; border-radius: 4px;
-      border: none; background: transparent;
-      color: rgba(255,255,255,0.15); font-size: 11px;
+      border: none; background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.35); font-size: 11px;
       cursor: pointer; display: flex;
       align-items: center; justify-content: center;
       transition: all 0.15s; flex-shrink: 0;
-      opacity: 0;
     }
-    .conn-item:hover .conn-del { opacity: 1; }
-    .conn-del:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+    .conn-del:hover { background: rgba(239,68,68,0.3); color: #ef4444; }
 
     .empty {
       flex: 1; display: flex; flex-direction: column;

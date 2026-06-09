@@ -54,10 +54,13 @@
     .reminder-item {
       display: flex; align-items: center; gap: 8px;
       padding: 7px 10px; border-radius: 7px;
-      background: rgba(255,255,255,0.03);
-      flex-shrink: 0; transition: background 0.15s;
+      background: rgba(255,255,255,0.05);
+      flex-shrink: 0; transition: all 0.15s;
     }
-    .reminder-item:hover { background: rgba(255,255,255,0.06); }
+    .reminder-item:hover {
+      background: rgba(255,255,255,0.12);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
     .reminder-item.triggered {
       background: rgba(239,68,68,0.1);
       border: 1px solid rgba(239,68,68,0.3);
@@ -72,18 +75,18 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .reminder-meta {
-      font-size: 0.65rem; color: rgba(255,255,255,0.35);
+      font-size: 0.65rem; color: rgba(255,255,255,0.5);
       font-family: monospace; margin-top: 1px;
     }
     .reminder-del {
       width: 20px; height: 20px; border-radius: 4px;
-      border: none; background: transparent;
-      color: rgba(255,255,255,0.15); font-size: 10px;
+      border: none; background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.35); font-size: 10px;
       cursor: pointer; display: flex;
       align-items: center; justify-content: center;
-      transition: all 0.15s; flex-shrink: 0; opacity: 0;
+      transition: all 0.15s; flex-shrink: 0;
     }
-    .reminder-item:hover .reminder-del { opacity: 1; }
+    .reminder-del:hover { background: rgba(239,68,68,0.3); color: #ef4444; }
     .reminder-del:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
 
     .empty {
