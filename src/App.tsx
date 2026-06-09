@@ -35,7 +35,8 @@ const DEFAULT_WIDGETS: WidgetLayout[] = [
   { id: "ai-news", instanceId: "news_1", x: 18, y: 2, w: 4, h: 4 },
   { id: "weibo-hot", instanceId: "weibo_1", x: 14, y: 6, w: 4, h: 4 },
   { id: "disk-monitor", instanceId: "disk_1", x: 8, y: 8, w: 6, h: 4 },
-  { id: "ssh-manager", instanceId: "ssh_1", x: 2, y: 8, w: 4, h: 4 }
+  { id: "ssh-manager", instanceId: "ssh_1", x: 2, y: 8, w: 4, h: 4 },
+  { id: "reminder", instanceId: "reminder_1", x: 6, y: 8, w: 4, h: 4 }
 ];
 
 function todayStr(): string {

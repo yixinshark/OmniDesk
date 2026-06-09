@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>事件提醒</title>
+  <script src="/widget-sdk.js"></script>
+  <style>
+    body {
+      margin: 0; padding: 14px 16px; height: 100vh;
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, rgba(20,25,35,0.4), rgba(40,50,65,0.4));
+      color: rgba(255,255,255,0.9);
+      display: flex; flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+      position: relative; overflow: hidden;
+    }
+
+    .header {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 10px; flex-shrink: 0;
+    }
+    .header-title {
+      font-size: 0.85rem; font-weight: 500;
+      color: rgba(255,255,255,0.6); flex: 1;
+    }
+    .header-btn {
+      width: 26px; height: 26px;
+      border-radius: 6px; border: none;
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.6);
+      font-size: 14px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .header-btn:hover { background: rgba(255,255,255,0.2); color: rgba(255,255,255,0.9); }
+
+    /* 输入区域 */
+    .input-section { flex-shrink: 0; margin-bottom: 10px; }
+    .input-row {
+      display: flex; gap: 6px; margin-bottom: 8px;
+    }
+    .text-input {
+      flex: 1; padding: 6px 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.9); font-size: 0.78rem;
+      outline: none; transition: border-color 0.2s;
+    }
+    .text-input:focus { border-color: #60a5fa; }
+    .text-input::placeholder { color: rgba(255,255,255,0.25); }
+
+    .quick-times {
+      display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px;
+    }
+    .quick-btn {
+      padding: 3px 10px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: transparent; color: rgba(255,255,255,0.5);
+      font-size: 0.68rem; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .quick-btn:hover { border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.8); }
+    .quick-btn.active { border-color: #60a5fa; color: #60a5fa; background: rgba(96,165,250,0.1); }
+
+    .options-row {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 0.7rem; color: rgba(255,255,255,0.5);
+    }
+    .checkbox-label {
+      display: flex; align-items: center; gap: 4px; cursor: pointer;
+    }
+    .checkbox-label input { accent-color: #60a5fa; }
+
+    .custom-time-row {
+      display: none; gap: 6px; margin-bottom: 8px; align-items: center;
+    }
+    .custom-time-row.show { display: flex; }
+    .time-input {
+      padding: 4px 8px; border-radius: 5px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.9); font-size: 0.75rem;
+      outline: none; font-family: monospace;
+    }
+    .time-input:focus { border-color: #60a5fa; }
+
+    .add-btn {
+      width: 100%; padding: 6px;
+      border-radius: 6px; border: none;
+      background: #3b82f6; color: #fff;
+      font-size: 0.75rem; font-weight: 500;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .add-btn:hover { background: #2563eb; }
+
+    /* 提醒列表 */
+    .list-header {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 0.72rem; color: rgba(255,255,255,0.4);
+      margin-bottom: 6px; flex-shrink: 0;
+    }
+    .reminder-list {
+      flex: 1; min-height: 0; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .reminder-list::-webkit-scrollbar { width: 4px; }
+    .reminder-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+    .reminder-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: 7px;
+      background: rgba(255,255,255,0.03);
+      flex-shrink: 0; transition: background 0.15s;
+    }
+    .reminder-item:hover { background: rgba(255,255,255,0.06); }
+    .reminder-item.triggered {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+    }
+
+    .reminder-icon {
+      font-size: 14px; flex-shrink: 0; width: 20px; text-align: center;
+    }
+    .reminder-info { flex: 1; min-width: 0; }
+    .reminder-text {
+      font-size: 0.78rem; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .reminder-meta {
+      font-size: 0.65rem; color: rgba(255,255,255,0.35);
+      font-family: monospace; margin-top: 1px;
+    }
+    .reminder-del {
+      width: 20px; height: 20px; border-radius: 4px;
+      border: none; background: transparent;
+      color: rgba(255,255,255,0.15); font-size: 10px;
+      cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      transition: all 0.15s; flex-shrink: 0; opacity: 0;
+    }
+    .reminder-item:hover .reminder-del { opacity: 1; }
+    .reminder-del:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+
+    .empty {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.25); font-size: 0.78rem; gap: 6px;
+    }
+    .empty-icon { font-size: 1.8rem; opacity: 0.4; }
+
+    .toast {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.85); color: #fff;
+      padding: 5px 12px; border-radius: 6px;
+      font-size: 0.72rem; z-index: 20;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-title">⏰ 事件提醒</div>
+    <button class="header-btn" id="btn-clear-done" title="清除已过期">🧹</button>
+  </div>
+
+  <div class="input-section">
+    <div class="input-row">
+      <input class="text-input" id="input-text" placeholder="输入提醒事项，如：喝水、起身活动...">
+    </div>
+    <div class="quick-times">
+      <button class="quick-btn active" data-min="15">15分</button>
+      <button class="quick-btn" data-min="30">30分</button>
+      <button class="quick-btn" data-min="60">1小时</button>
+      <button class="quick-btn" data-min="120">2小时</button>
+      <button class="quick-btn" data-min="custom">自定义</button>
+    </div>
+    <div class="custom-time-row" id="custom-row">
+      <span style="font-size:0.68rem;color:rgba(255,255,255,0.4);">指定时间:</span>
+      <input class="time-input" id="custom-time" type="time">
+      <span style="font-size:0.65rem;color:rgba(255,255,255,0.25);">或</span>
+      <input class="text-input" id="custom-minutes" type="number" placeholder="分钟后" style="width:60px;flex:none;padding:4px 6px;font-size:0.72rem;">
+    </div>
+    <div class="options-row">
+      <label class="checkbox-label"><input type="checkbox" id="opt-notify" checked> 系统通知</label>
+      <label class="checkbox-label"><input type="checkbox" id="opt-repeat"> 重复提醒</label>
+    </div>
+    <button class="add-btn" id="btn-add" style="margin-top:8px;">添加提醒</button>
+  </div>
+
+  <div class="list-header">
+    <span>活动提醒</span>
+    <span id="count-badge">0</span>
+  </div>
+
+  <div class="reminder-list" id="reminder-list">
+    <div class="empty">
+      <div class="empty-icon">🔔</div>
+      <div>暂无提醒</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const DATA_FILE = 'reminders.json';
+    let reminders = [];
+    let selectedMinutes = 15;
+    let tickTimer = null;
+
+    function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
+    async function loadData() {
+      try {
+        const data = await window.__widgetBridge.invoke('widget_read_file', { filename: DATA_FILE });
+        if (data) reminders = JSON.parse(data);
+      } catch { reminders = []; }
+      // 清理过期的一次性提醒
+      const now = Date.now();
+      reminders = reminders.filter(r => r.repeat || r.triggerAt > now || r.triggered);
+      render();
+    }
+
+    function saveData() {
+      window.__widgetBridge.invoke('widget_write_file', { filename: DATA_FILE, content: JSON.stringify(reminders) });
+    }
+
+    function formatTime(ts) {
+      const d = new Date(ts);
+      const h = d.getHours().toString().padStart(2, '0');
+      const m = d.getMinutes().toString().padStart(2, '0');
+      return `${h}:${m}`;
+    }
+
+    function formatCountdown(ts) {
+      const diff = ts - Date.now();
+      if (diff <= 0) return '已到时间';
+      const mins = Math.floor(diff / 60000);
+      if (mins < 60) return `${mins}分钟后`;
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? `${hrs}小时${rem}分后` : `${hrs}小时后`;
+    }
+
+    function render() {
+      const list = document.getElementById('reminder-list');
+      const now = Date.now();
+
+      // 排序：未触发的在前，按时间升序
+      const sorted = [...reminders].sort((a, b) => {
+        if (a.triggered !== b.triggered) return a.triggered ? 1 : -1;
+        return a.triggerAt - b.triggerAt;
+      });
+
+      const active = reminders.filter(r => !r.triggered).length;
+      document.getElementById('count-badge').innerText = active;
+
+      if (sorted.length === 0) {
+        list.innerHTML = '<div class="empty"><div class="empty-icon">🔔</div><div>暂无提醒</div></div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      sorted.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'reminder-item' + (r.triggered ? ' triggered' : '');
+
+        const icon = r.triggered ? '🔔' : (r.repeat ? '🔁' : '⏳');
+        const meta = r.triggered
+          ? `已提醒 · ${formatTime(r.triggerAt)}`
+          : (r.repeat ? `每${r.interval / 60000}分钟 · 下次 ${formatTime(r.triggerAt)}` : `${formatTime(r.triggerAt)} · ${formatCountdown(r.triggerAt)}`);
+
+        const iconDiv = document.createElement('div');
+        iconDiv.className = 'reminder-icon';
+        iconDiv.textContent = icon;
+
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'reminder-info';
+        infoDiv.innerHTML = `<div class="reminder-text">${r.text}</div><div class="reminder-meta">${meta}</div>`;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'reminder-del';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', () => deleteReminder(r.id));
+
+        item.appendChild(iconDiv);
+        item.appendChild(infoDiv);
+        item.appendChild(delBtn);
+        list.appendChild(item);
+      });
+    }
+
+    function deleteReminder(id) {
+      reminders = reminders.filter(r => r.id !== id);
+      saveData();
+      render();
+    }
+
+    async function triggerReminder(r) {
+      r.triggered = true;
+      saveData();
+      render();
+
+      // 发送系统通知
+      if (r.notify) {
+        try {
+          await window.__widgetBridge.invoke('send_notification', {
+            title: '⏰ 事件提醒',
+            body: r.text
+          });
+        } catch (e) {
+          // 通知发送失败，静默处理
+        }
+      }
+
+      // 如果是重复提醒，设置下一次
+      if (r.repeat && r.interval) {
+        setTimeout(() => {
+          r.triggered = false;
+          r.triggerAt = Date.now() + r.interval;
+          saveData();
+          render();
+        }, 3000); // 3秒后重置为下一次提醒
+      }
+    }
+
+    function tick() {
+      const now = Date.now();
+      reminders.forEach(r => {
+        if (!r.triggered && r.triggerAt <= now) {
+          triggerReminder(r);
+        }
+      });
+    }
+
+    function addReminder() {
+      const text = document.getElementById('input-text').value.trim();
+      if (!text) { showToast('请输入提醒事项'); return; }
+
+      const notify = document.getElementById('opt-notify').checked;
+      const repeat = document.getElementById('opt-repeat').checked;
+
+      let triggerAt;
+      let interval = null;
+
+      if (selectedMinutes === 'custom') {
+        const timeVal = document.getElementById('custom-time').value;
+        const minVal = document.getElementById('custom-minutes').value;
+        if (minVal) {
+          triggerAt = Date.now() + parseInt(minVal, 10) * 60000;
+        } else if (timeVal) {
+          const [h, m] = timeVal.split(':').map(Number);
+          const target = new Date();
+          target.setHours(h, m, 0, 0);
+          if (target <= Date.now()) target.setDate(target.getDate() + 1);
+          triggerAt = target.getTime();
+        } else {
+          showToast('请设置时间'); return;
+        }
+      } else {
+        triggerAt = Date.now() + selectedMinutes * 60000;
+      }
+
+      if (repeat) {
+        interval = selectedMinutes === 'custom'
+          ? (parseInt(document.getElementById('custom-minutes').value, 10) || 60) * 60000
+          : selectedMinutes * 60000;
+      }
+
+      reminders.push({
+        id: genId(),
+        text,
+        triggerAt,
+        interval,
+        notify,
+        repeat,
+        triggered: false
+      });
+
+      saveData();
+      render();
+
+      // 清空输入
+      document.getElementById('input-text').value = '';
+      document.getElementById('custom-time').value = '';
+      document.getElementById('custom-minutes').value = '';
+
+      showToast(`已添加: ${text}`);
+    }
+
+    // 快捷时间按钮
+    document.querySelectorAll('.quick-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const val = btn.dataset.min;
+        if (val === 'custom') {
+          selectedMinutes = 'custom';
+          document.getElementById('custom-row').classList.add('show');
+        } else {
+          selectedMinutes = parseInt(val, 10);
+          document.getElementById('custom-row').classList.remove('show');
+        }
+      });
+    });
+
+    // 清除已过期
+    document.getElementById('btn-clear-done').addEventListener('click', () => {
+      reminders = reminders.filter(r => !r.triggered);
+      saveData();
+      render();
+      showToast('已清除过期提醒');
+    });
+
+    // 添加按钮
+    document.getElementById('btn-add').addEventListener('click', addReminder);
+
+    // Enter 提交
+    document.getElementById('input-text').addEventListener('keydown', e => {
+      if (e.key === 'Enter') addReminder();
+    });
+
+    // 启动定时检查
+    tickTimer = setInterval(tick, 1000);
+
+    loadData();
+  </script>
+</body>
+</html>

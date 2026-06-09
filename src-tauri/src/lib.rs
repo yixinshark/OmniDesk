@@ -536,6 +536,18 @@ fn write_config(app_handle: tauri::AppHandle, config: serde_json::Value) -> Resu
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn send_notification(app_handle: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app_handle.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix GBM EGL display initialization error on Linux
@@ -547,9 +559,10 @@ pub fn run() {
             save_layout, load_layout, widget_read_file, widget_write_file, open_url, open_ssh, fetch_proxy, check_and_cache_video,
             list_available_widgets, get_top_processes, kill_process, read_config, write_config, check_and_cache_image,
             list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url,
-            save_ai_keys, get_ai_keys, fetch_ai_quota
+            save_ai_keys, get_ai_keys, fetch_ai_quota, send_notification
         ])
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .register_uri_scheme_protocol("local-video", |ctx, request| {
             // Extract filename from URL: local-video://localhost/filename
             let url = request.uri().to_string();

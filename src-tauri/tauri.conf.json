@@ -30,6 +30,11 @@
       }
     }
   },
+  "plugins": {
+    "notification": {
+      "enabled": true
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
