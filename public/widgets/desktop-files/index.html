@@ -224,6 +224,9 @@
       load();
     });
 
+    // 屏蔽默认右键菜单（WebKit 自带的"重新加载/检查元素"等）；后续做自定义菜单可在此扩展
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
     load();
     setInterval(load, 5000); // 轻量轮询，自动同步新增/删除
   </script>
