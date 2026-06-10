@@ -100,6 +100,94 @@ npm install
 npm run tauri dev
 ```
 
+## 📦 构建 Debian 安装包
+
+```bash
+# 构建 release 二进制、生成 deb 包，并规整系统集成文件
+npm run build:deb
+```
+
+构建产物默认输出到：
+
+```bash
+src-tauri/target/release/bundle/deb/tauri-app_0.1.0_amd64.deb
+```
+
+安装本地 deb 包：
+
+```bash
+sudo apt install ./src-tauri/target/release/bundle/deb/tauri-app_0.1.0_amd64.deb
+```
+
+当前 deb 包会安装：
+
+- 主程序：`/usr/bin/tauri-app`
+- 用户级 systemd 服务：`/usr/lib/systemd/user/tauri-app.service`
+- Deepin 用户会话启动软链接：`/usr/lib/systemd/user/dde-session-core.target.wants/tauri-app.service -> ../tauri-app.service`
+
+OmniDesk 是桌面层组件，不作为普通应用出现在应用启动器里。因此 deb 后处理脚本会移除 Tauri 默认生成的 `/usr/share/applications/tauri-app.desktop`。
+
+安装后，`tauri-app.service` 会通过包内的 `dde-session-core.target.wants` 软链接接入 Deepin 用户会话。用户重启或注销后重新登录时，程序会由 `systemd --user` 随 `dde-session-core.target` 启动。
+
+## 🧩 Deepin 桌面服务接管
+
+Deepin 系统上，如果要先屏蔽系统自带桌面服务，再安装并启动 OmniDesk，可以按下面流程操作。以下命令以当前机器上的桌面服务名为例：
+
+```bash
+SYSTEM_DESKTOP_SERVICE='dde-shell-plugin@org.deepin.ds.desktop.service'
+OUR_SERVICE='tauri-app.service'
+```
+
+先停止当前会话中的系统桌面服务，并全局 mask，避免下次登录时再次启动：
+
+```bash
+systemctl --user stop "$SYSTEM_DESKTOP_SERVICE" || true
+sudo systemctl --global mask "$SYSTEM_DESKTOP_SERVICE"
+```
+
+然后安装 deb 包：
+
+```bash
+sudo apt install ./src-tauri/target/release/bundle/deb/tauri-app_0.1.0_amd64.deb
+```
+
+在当前已登录会话中立即启动 OmniDesk：
+
+```bash
+sudo systemctl --global unmask "$OUR_SERVICE" || true
+systemctl --user daemon-reload
+systemctl --user start "$OUR_SERVICE"
+systemctl --user status "$OUR_SERVICE"
+```
+
+重启或注销后重新登录时，`tauri-app.service` 会随 Deepin 用户会话自动启动。
+
+### 恢复系统桌面服务
+
+如果要停用 OmniDesk，并恢复 Deepin 原生桌面服务：
+
+```bash
+SYSTEM_DESKTOP_SERVICE='dde-shell-plugin@org.deepin.ds.desktop.service'
+OUR_SERVICE='tauri-app.service'
+```
+
+先停止并全局 mask OmniDesk：
+
+```bash
+systemctl --user stop "$OUR_SERVICE" || true
+sudo systemctl --global disable "$OUR_SERVICE" || true
+sudo systemctl --global mask "$OUR_SERVICE"
+```
+
+恢复系统桌面服务并启动：
+
+```bash
+sudo systemctl --global unmask "$SYSTEM_DESKTOP_SERVICE"
+systemctl --user daemon-reload
+systemctl --user start "$SYSTEM_DESKTOP_SERVICE"
+systemctl --user status "$SYSTEM_DESKTOP_SERVICE"
+```
+
 ## 📂 项目结构指南
 
 - `src-tauri/src/lib.rs`：核心的 Rust 业务逻辑，包含 HTTP Proxy、文件系统挂载与监控数据采集。

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+SERVICE_NAME="tauri-app.service"
+
+case "$1" in
+  configure)
+    # The package ships usr/lib/systemd/user/dde-session-core.target.wants/$SERVICE_NAME.
+    # Current sessions can start it manually with systemctl --user start.
+    :
+    ;;
+esac
+
+exit 0

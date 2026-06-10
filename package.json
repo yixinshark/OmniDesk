@@ -7,6 +7,7 @@
     "dev": "WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri dev",
     "dev:web": "vite",
     "build": "tsc && vite build",
+    "build:deb": "npm run tauri -- build --bundles deb && ./src-tauri/deb/postprocess.sh",
     "preview": "vite preview",
     "tauri": "WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri"
   },
