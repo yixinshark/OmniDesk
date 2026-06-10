@@ -225,10 +225,21 @@
 
     // Default config
     let monitorConfig = { showCpu: true, showRam: true, showSwap: false, showTemp: false, showNetwork: false, showTop: false, refreshRate: 2 };
+    let lastSysinfoRenderAt = 0;
+    const lastValues = {};
 
     function setRing(id, pct) {
       const el = document.getElementById(id);
-      if (el) el.style.strokeDashoffset = CIRC - (pct / 100) * CIRC;
+      if (!el || lastValues[id] === pct) return;
+      lastValues[id] = pct;
+      el.style.strokeDashoffset = CIRC - (pct / 100) * CIRC;
+    }
+
+    function setText(id, value) {
+      if (lastValues[id] === value) return;
+      lastValues[id] = value;
+      const el = document.getElementById(id);
+      if (el) el.innerText = value;
     }
 
     function fmtSpeed(b) {
@@ -324,30 +335,35 @@
     // Handle sysinfo updates
     window.__widgetBridge.on('sysinfo_update', (data) => {
       if (!data) return;
+      const now = Date.now();
+      const minInterval = Math.max(1, monitorConfig.refreshRate || 2) * 1000;
+      if (now - lastSysinfoRenderAt < minInterval - 100) return;
+      lastSysinfoRenderAt = now;
+
       if (monitorConfig.showCpu) {
         const cpu = Math.round(data.cpu_usage);
-        document.getElementById('cpu-text').innerText = cpu + '%';
+        setText('cpu-text', cpu + '%');
         setRing('cpu-ring', cpu);
       }
       if (monitorConfig.showRam) {
         const mem = Math.round(data.mem_usage);
-        document.getElementById('mem-text').innerText = mem + '%';
+        setText('mem-text', mem + '%');
         setRing('mem-ring', mem);
       }
       if (monitorConfig.showSwap) {
         const swap = Math.round(data.swap_usage || 0);
-        document.getElementById('swap-text').innerText = swap + '%';
+        setText('swap-text', swap + '%');
         setRing('swap-ring', swap);
       }
       if (monitorConfig.showTemp) {
         const temp = Math.round(data.cpu_temp || 0);
-        document.getElementById('temp-text').innerText = temp + '°';
+        setText('temp-text', temp + '°');
         // 温度映射到百分比：0°C=0%, 100°C=100%
         setRing('temp-ring', Math.min(100, temp));
       }
       if (monitorConfig.showNetwork && data.net_bytes_in !== undefined) {
-        document.getElementById('net-down').innerText = fmtSpeed(data.net_bytes_in);
-        document.getElementById('net-up').innerText = fmtSpeed(data.net_bytes_out);
+        setText('net-down', fmtSpeed(data.net_bytes_in));
+        setText('net-up', fmtSpeed(data.net_bytes_out));
       }
     });
 
@@ -390,7 +406,7 @@
 
     // Periodically refresh top if visible
     setInterval(() => {
-      if (monitorConfig.showTop) loadTop();
+      if (monitorConfig.showTop && !document.hidden) loadTop();
     }, 5000);
 
     // Init

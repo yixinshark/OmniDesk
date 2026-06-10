@@ -138,22 +138,15 @@
       return points.join(' ');
     }
 
-    function renderChart() {
-      const svg = document.getElementById('chart');
-      const rect = svg.getBoundingClientRect();
-      const w = rect.width || 300;
-      const h = rect.height || 100;
+    let chartInitialized = false;
+    let lastChartW = 0;
+    let lastChartH = 0;
 
-      // 找到最大值用于缩放
-      const allVals = [...downHistory, ...upHistory];
-      const maxVal = Math.max(1024, ...allVals) * 1.1;
-
-      // 构建面积路径（从左到右，再从右到左闭合）
-      const downLine = buildPath(downHistory, w, h, maxVal);
-      const upLine = buildPath(upHistory, w, h, maxVal);
-      const baseLine = `${w},${h} 0,${h}`;
-
-      // 更新 SVG
+    function ensureChart(svg, w, h) {
+      if (chartInitialized && lastChartW === w && lastChartH === h) return;
+      chartInitialized = true;
+      lastChartW = w;
+      lastChartH = h;
       svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
       svg.innerHTML = `
         <defs>
@@ -167,13 +160,36 @@
           </linearGradient>
         </defs>
         ${[0.25, 0.5, 0.75].map(r => `<line x1="0" y1="${h * r}" x2="${w}" y2="${h * r}" class="grid-line"/>`).join('')}
-        <polygon points="${downLine} ${baseLine}" class="area-down"/>
-        <polyline points="${downLine}" class="line-down"/>
-        <polygon points="${upLine} ${baseLine}" class="area-up"/>
-        <polyline points="${upLine}" class="line-up"/>
-        <text x="${w - 2}" y="10" text-anchor="end" class="axis-label">${formatSpeed(maxVal)}</text>
+        <polygon id="down-area" class="area-down"/>
+        <polyline id="down-line" class="line-down"/>
+        <polygon id="up-area" class="area-up"/>
+        <polyline id="up-line" class="line-up"/>
+        <text id="axis-max" x="${w - 2}" y="10" text-anchor="end" class="axis-label"></text>
         <text x="${w - 2}" y="${h - 2}" text-anchor="end" class="axis-label">0</text>
       `;
+    }
+
+    function renderChart() {
+      const svg = document.getElementById('chart');
+      const rect = svg.getBoundingClientRect();
+      const w = Math.round(rect.width || 300);
+      const h = Math.round(rect.height || 100);
+      ensureChart(svg, w, h);
+
+      // 找到最大值用于缩放
+      const allVals = [...downHistory, ...upHistory];
+      const maxVal = Math.max(1024, ...allVals) * 1.1;
+
+      // 构建面积路径（从左到右，再从右到左闭合）
+      const downLine = buildPath(downHistory, w, h, maxVal);
+      const upLine = buildPath(upHistory, w, h, maxVal);
+      const baseLine = `${w},${h} 0,${h}`;
+
+      document.getElementById('down-area').setAttribute('points', `${downLine} ${baseLine}`);
+      document.getElementById('down-line').setAttribute('points', downLine);
+      document.getElementById('up-area').setAttribute('points', `${upLine} ${baseLine}`);
+      document.getElementById('up-line').setAttribute('points', upLine);
+      document.getElementById('axis-max').textContent = formatSpeed(maxVal);
     }
 
     function updateDisplay(downBytes, upBytes) {
@@ -199,6 +215,7 @@
 
     // 初始渲染
     renderChart();
+    window.addEventListener('resize', renderChart);
   </script>
 </body>
 </html>

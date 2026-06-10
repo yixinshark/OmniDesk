@@ -11,7 +11,7 @@
 
 @layer utilities {
   .glass {
-    @apply bg-glass-bg border border-glass-border shadow-2xl;
+    @apply bg-glass-bg border border-glass-border shadow-lg;
     backdrop-filter: blur(var(--glass-blur));
     -webkit-backdrop-filter: blur(var(--glass-blur));
   }

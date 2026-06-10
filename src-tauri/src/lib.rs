@@ -1,13 +1,13 @@
 pub mod display;
 
 use display::DisplayBackend;
-use tauri::{Manager, Emitter};
-use sysinfo::{System, Networks, Components, Disks};
-use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::time::Duration;
+use sysinfo::{Components, Disks, Networks, System};
+use tauri::{Emitter, Manager};
 
 #[derive(Clone, Serialize)]
 struct DiskUsagePayload {
@@ -23,6 +23,118 @@ struct DiskIoPayload {
     name: String,
     read_bytes_per_sec: u64,
     write_bytes_per_sec: u64,
+}
+
+const SYSINFO_INTERVAL_SECS: u64 = 2;
+const COMPONENT_REFRESH_TICKS: u64 = 5; // 10s
+const DISK_USAGE_REFRESH_TICKS: u64 = 15; // 30s
+
+fn collect_cpu_temp(components: &Components) -> f32 {
+    components
+        .iter()
+        .filter(|c| {
+            let label = c.label().to_lowercase();
+            label.contains("core")
+                || label.contains("cpu")
+                || label.contains("package")
+                || label.contains("tctl")
+                || label.contains("tccd")
+                || label.contains("coretemp")
+                || label.contains("k10temp")
+                || label.contains("x86_pkg_temp")
+        })
+        .filter_map(|c| c.temperature())
+        .filter(|&t| t > 0.0)
+        .fold(0.0_f32, f32::max)
+}
+
+fn collect_disk_usage(disks: &Disks) -> Vec<DiskUsagePayload> {
+    let mut disk_usage = Vec::new();
+    for disk in disks {
+        let mount_point = disk.mount_point().to_string_lossy().to_string();
+        if mount_point.starts_with("/snap/")
+            || mount_point.starts_with("/run/")
+            || mount_point.starts_with("/sys/")
+            || mount_point.starts_with("/dev/")
+            || mount_point.starts_with("/boot")
+            || disk.is_removable()
+        {
+            continue;
+        }
+
+        let mut total_space = disk.total_space();
+        let mut available_space = disk.available_space();
+        let mut used_space = total_space.saturating_sub(available_space);
+
+        let c_mount_point = std::ffi::CString::new(mount_point.clone()).unwrap_or_default();
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c_mount_point.as_ptr(), &mut stat) } == 0 {
+            total_space = (stat.f_blocks as u64) * (stat.f_frsize as u64);
+            let free_space = (stat.f_bfree as u64) * (stat.f_frsize as u64);
+            available_space = (stat.f_bavail as u64) * (stat.f_frsize as u64);
+            used_space = total_space.saturating_sub(free_space);
+        }
+
+        disk_usage.push(DiskUsagePayload {
+            name: disk.name().to_string_lossy().to_string(),
+            mount_point,
+            total_space,
+            available_space,
+            used_space,
+        });
+    }
+    disk_usage
+}
+
+fn collect_disk_io(
+    prev_disk_io: &mut HashMap<String, (u64, u64)>,
+    first_run: bool,
+) -> Vec<DiskIoPayload> {
+    let mut disk_io = Vec::new();
+    if let Ok(file) = File::open("/proc/diskstats") {
+        let reader = BufReader::new(file);
+        for line in reader.lines().map_while(Result::ok) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 14 {
+                continue;
+            }
+
+            let name = parts[2].to_string();
+            if name.starts_with("loop") || name.starts_with("ram") || name.starts_with("sr") {
+                continue;
+            }
+
+            if let (Ok(sectors_read), Ok(sectors_written)) =
+                (parts[5].parse::<u64>(), parts[9].parse::<u64>())
+            {
+                let prev = prev_disk_io
+                    .entry(name.clone())
+                    .or_insert((sectors_read, sectors_written));
+                let read_bytes = if first_run {
+                    0
+                } else {
+                    sectors_read.saturating_sub(prev.0) * 512
+                };
+                let write_bytes = if first_run {
+                    0
+                } else {
+                    sectors_written.saturating_sub(prev.1) * 512
+                };
+                *prev = (sectors_read, sectors_written);
+
+                let is_whole_disk = !name.chars().last().unwrap_or('a').is_ascii_digit()
+                    || (name.contains("nvme") && !name.contains('p'));
+                if is_whole_disk {
+                    disk_io.push(DiskIoPayload {
+                        name,
+                        read_bytes_per_sec: read_bytes / SYSINFO_INTERVAL_SECS,
+                        write_bytes_per_sec: write_bytes / SYSINFO_INTERVAL_SECS,
+                    });
+                }
+            }
+        }
+    }
+    disk_io
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -41,12 +153,15 @@ pub struct AiQuotaPayload {
 
 #[tauri::command]
 fn save_ai_keys(deepseek: String, anyrouter: String) -> Result<(), String> {
-    let keys = AiKeys { deepseek, anyrouter };
+    let keys = AiKeys {
+        deepseek,
+        anyrouter,
+    };
     let path = dirs_next::home_dir()
         .ok_or("Cannot find home directory")?
         .join(".omnidesk")
         .join("api_keys.json");
-        
+
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let json = serde_json::to_string(&keys).unwrap();
     std::fs::write(path, json).map_err(|e| e.to_string())?;
@@ -59,7 +174,7 @@ fn get_ai_keys() -> Result<AiKeys, String> {
         .ok_or("Cannot find home directory")?
         .join(".omnidesk")
         .join("api_keys.json");
-        
+
     if path.exists() {
         let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         if let Ok(keys) = serde_json::from_str::<AiKeys>(&content) {
@@ -78,21 +193,25 @@ async fn fetch_ai_quota() -> Result<AiQuotaPayload, String> {
         anyrouter_total: None,
         error: None,
     };
-    
+
     let client = reqwest::Client::new();
-    
+
     // Fetch DeepSeek
     if !keys.deepseek.is_empty() {
-        if let Ok(resp) = client.get("https://api.deepseek.com/user/balance")
+        if let Ok(resp) = client
+            .get("https://api.deepseek.com/user/balance")
             .bearer_auth(&keys.deepseek)
-            .send().await 
+            .send()
+            .await
         {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(infos) = json.get("balance_infos").and_then(|i| i.as_array()) {
                     if let Some(info) = infos.first() {
                         if let Some(bal_str) = info.get("total_balance").and_then(|v| v.as_str()) {
                             payload.deepseek_balance = bal_str.parse::<f64>().ok();
-                        } else if let Some(bal_num) = info.get("total_balance").and_then(|v| v.as_f64()) {
+                        } else if let Some(bal_num) =
+                            info.get("total_balance").and_then(|v| v.as_f64())
+                        {
                             payload.deepseek_balance = Some(bal_num);
                         }
                     }
@@ -103,24 +222,29 @@ async fn fetch_ai_quota() -> Result<AiQuotaPayload, String> {
 
     // Fetch AnyRouter
     if !keys.anyrouter.is_empty() {
-        if let Ok(resp) = client.get("https://anyrouter.top/api/user/self")
+        if let Ok(resp) = client
+            .get("https://anyrouter.top/api/user/self")
             .header("Authorization", format!("Bearer {}", keys.anyrouter))
-            .send().await
+            .send()
+            .await
         {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(data) = json.get("data") {
-                    if let (Some(quota), Some(used)) = (data.get("quota").and_then(|v| v.as_f64()), data.get("used_quota").and_then(|v| v.as_f64())) {
+                    if let (Some(quota), Some(used)) = (
+                        data.get("quota").and_then(|v| v.as_f64()),
+                        data.get("used_quota").and_then(|v| v.as_f64()),
+                    ) {
                         payload.anyrouter_total = Some(quota / 500000.0);
                         payload.anyrouter_used = Some(used / 500000.0);
                     } else if let Some(quota) = data.get("quota").and_then(|v| v.as_f64()) {
-                         payload.anyrouter_total = Some(quota / 500000.0);
-                         payload.anyrouter_used = Some(0.0);
+                        payload.anyrouter_total = Some(quota / 500000.0);
+                        payload.anyrouter_used = Some(0.0);
                     }
                 }
             }
         }
     }
-    
+
     Ok(payload)
 }
 
@@ -165,17 +289,24 @@ struct WallpaperInfo {
 
 #[tauri::command]
 fn save_layout(app_handle: tauri::AppHandle, layout: serde_json::Value) -> Result<(), String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("layout.json");
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("layout.json");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&layout).unwrap())
-        .map_err(|e| e.to_string())
+    std::fs::write(&path, serde_json::to_string_pretty(&layout).unwrap()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn load_layout(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("layout.json");
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("layout.json");
     if let Ok(content) = std::fs::read_to_string(path) {
         serde_json::from_str(&content).map_err(|e| e.to_string())
     } else {
@@ -184,8 +315,17 @@ fn load_layout(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String
 }
 
 #[tauri::command]
-fn widget_write_file(app_handle: tauri::AppHandle, filename: String, content: String) -> Result<(), String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("widget_data").join(&filename);
+fn widget_write_file(
+    app_handle: tauri::AppHandle,
+    filename: String,
+    content: String,
+) -> Result<(), String> {
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("widget_data")
+        .join(&filename);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -196,17 +336,31 @@ use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
 fn widget_read_file(app_handle: tauri::AppHandle, filename: String) -> Result<String, String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("widget_data").join(&filename);
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("widget_data")
+        .join(&filename);
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn open_url(app_handle: tauri::AppHandle, url: String) -> Result<(), String> {
-    app_handle.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    app_handle
+        .opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn open_ssh(host: String, user: String, port: u16, password: Option<String>, terminal: Option<String>) -> Result<(), String> {
+fn open_ssh(
+    host: String,
+    user: String,
+    port: u16,
+    password: Option<String>,
+    terminal: Option<String>,
+) -> Result<(), String> {
     // 构建 SSH 命令
     let ssh_args = if port == 22 {
         format!("ssh {}@{}", user, host)
@@ -261,7 +415,11 @@ fn open_ssh(host: String, user: String, port: u16, password: Option<String>, ter
 }
 
 #[tauri::command]
-async fn fetch_proxy(url: String, token: Option<String>, headers: Option<std::collections::HashMap<String, String>>) -> Result<String, String> {
+async fn fetch_proxy(
+    url: String,
+    token: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<String, String> {
     let client = reqwest::Client::new();
     let mut req = client.get(&url).header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     if let Some(t) = token {
@@ -283,8 +441,17 @@ async fn fetch_proxy(url: String, token: Option<String>, headers: Option<std::co
 }
 
 #[tauri::command]
-async fn check_and_cache_image(app_handle: tauri::AppHandle, url: String, filename: String) -> Result<Option<String>, String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers").join(&filename);
+async fn check_and_cache_image(
+    app_handle: tauri::AppHandle,
+    url: String,
+    filename: String,
+) -> Result<Option<String>, String> {
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("wallpapers")
+        .join(&filename);
     if path.exists() {
         return Ok(Some(path.to_string_lossy().to_string()));
     }
@@ -301,15 +468,25 @@ async fn check_and_cache_image(app_handle: tauri::AppHandle, url: String, filena
             if let Ok(bytes) = resp.bytes().await {
                 if std::fs::write(&tmp_path, bytes).is_ok() {
                     let _ = std::fs::rename(&tmp_path, &path);
-                } else { let _ = std::fs::remove_file(&tmp_path); }
-            } else { let _ = std::fs::remove_file(&tmp_path); }
-        } else { let _ = std::fs::remove_file(&tmp_path); }
+                } else {
+                    let _ = std::fs::remove_file(&tmp_path);
+                }
+            } else {
+                let _ = std::fs::remove_file(&tmp_path);
+            }
+        } else {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
     });
     Ok(None)
 }
 
 #[tauri::command]
-async fn check_and_cache_video(app_handle: tauri::AppHandle, url: String, filename: String) -> Result<Option<String>, String> {
+async fn check_and_cache_video(
+    _app_handle: tauri::AppHandle,
+    _url: String,
+    _filename: String,
+) -> Result<Option<String>, String> {
     // 废弃本地视频缓存机制：
     // Linux WebKitGTK 无法可靠地播放带有自定义协议或 asset:// 的本地视频。
     // 为了防止后台下载任务占用带宽导致前端在线流媒体卡顿/断流，我们在这里直接返回 None 并且不发起下载。
@@ -333,7 +510,9 @@ fn list_available_widgets(_app_handle: tauri::AppHandle) -> Result<Vec<WidgetMan
 
     let mut widgets = Vec::new();
     for dir in &widget_dirs {
-        if !dir.exists() { continue; }
+        if !dir.exists() {
+            continue;
+        }
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let manifest_path = entry.path().join("manifest.json");
@@ -346,7 +525,9 @@ fn list_available_widgets(_app_handle: tauri::AppHandle) -> Result<Vec<WidgetMan
                 }
             }
         }
-        if !widgets.is_empty() { break; }
+        if !widgets.is_empty() {
+            break;
+        }
     }
     Ok(widgets)
 }
@@ -361,7 +542,8 @@ async fn get_top_processes() -> Result<Vec<ProcessInfo>, String> {
         std::thread::sleep(Duration::from_millis(100));
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-        let mut processes: Vec<ProcessInfo> = sys.processes()
+        let mut processes: Vec<ProcessInfo> = sys
+            .processes()
             .values()
             .map(|p| ProcessInfo {
                 pid: p.pid().as_u32(),
@@ -372,7 +554,11 @@ async fn get_top_processes() -> Result<Vec<ProcessInfo>, String> {
             })
             .collect();
 
-        processes.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+        processes.sort_by(|a, b| {
+            b.cpu_usage
+                .partial_cmp(&a.cpu_usage)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         processes.truncate(15);
         Ok(processes)
     })
@@ -404,7 +590,11 @@ fn kill_process(pid: u32) -> Result<String, String> {
 
 #[tauri::command]
 fn list_wallpapers(app_handle: tauri::AppHandle) -> Result<Vec<WallpaperInfo>, String> {
-    let dir = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers");
+    let dir = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("wallpapers");
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -416,7 +606,11 @@ fn list_wallpapers(app_handle: tauri::AppHandle) -> Result<Vec<WallpaperInfo>, S
                 let ext_str = ext.to_string_lossy().to_lowercase();
                 let wtype = if ext_str == "mp4" || ext_str == "mov" || ext_str == "webm" {
                     "video"
-                } else if ext_str == "jpg" || ext_str == "jpeg" || ext_str == "png" || ext_str == "webp" {
+                } else if ext_str == "jpg"
+                    || ext_str == "jpeg"
+                    || ext_str == "png"
+                    || ext_str == "webp"
+                {
                     "static"
                 } else {
                     continue;
@@ -425,7 +619,11 @@ fn list_wallpapers(app_handle: tauri::AppHandle) -> Result<Vec<WallpaperInfo>, S
                 if path.extension().map_or(false, |e| e == "tmp") {
                     continue;
                 }
-                let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let filename = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 wallpapers.push(WallpaperInfo {
                     filename,
@@ -443,7 +641,12 @@ fn list_wallpapers(app_handle: tauri::AppHandle) -> Result<Vec<WallpaperInfo>, S
 
 #[tauri::command]
 fn delete_wallpaper(app_handle: tauri::AppHandle, filename: String) -> Result<(), String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers").join(&filename);
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("wallpapers")
+        .join(&filename);
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| e.to_string())?;
     }
@@ -462,7 +665,11 @@ fn get_image_data_url(path: String) -> Result<Option<String>, String> {
         return Ok(None);
     }
     let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_lowercase();
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg")
+        .to_lowercase();
     let mime = match ext.as_str() {
         "png" => "image/png",
         "webp" => "image/webp",
@@ -483,17 +690,38 @@ fn base64_encode(data: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
         result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 { result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char); } else { result.push('='); }
-        if chunk.len() > 2 { result.push(CHARS[(triple & 0x3F) as usize] as char); } else { result.push('='); }
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
     }
     result
 }
 
 #[tauri::command]
-fn generate_video_thumbnail(app_handle: tauri::AppHandle, filename: String) -> Result<Option<String>, String> {
-    let dir = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers");
+fn generate_video_thumbnail(
+    app_handle: tauri::AppHandle,
+    filename: String,
+) -> Result<Option<String>, String> {
+    let dir = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("wallpapers");
     let video_path = dir.join(&filename);
-    let thumb_path = dir.join(format!("{}_thumb.jpg", filename.rsplit_once('.').map(|(n, _)| n).unwrap_or(&filename)));
+    let thumb_path = dir.join(format!(
+        "{}_thumb.jpg",
+        filename
+            .rsplit_once('.')
+            .map(|(n, _)| n)
+            .unwrap_or(&filename)
+    ));
 
     if thumb_path.exists() {
         return Ok(Some(thumb_path.to_string_lossy().to_string()));
@@ -505,7 +733,16 @@ fn generate_video_thumbnail(app_handle: tauri::AppHandle, filename: String) -> R
 
     // Use ffmpeg to extract first frame
     let output = std::process::Command::new("ffmpeg")
-        .args(["-i", &video_path.to_string_lossy(), "-vframes", "1", "-q:v", "3", "-y", &thumb_path.to_string_lossy()])
+        .args([
+            "-i",
+            &video_path.to_string_lossy(),
+            "-vframes",
+            "1",
+            "-q:v",
+            "3",
+            "-y",
+            &thumb_path.to_string_lossy(),
+        ])
         .output();
 
     match output {
@@ -518,7 +755,11 @@ fn generate_video_thumbnail(app_handle: tauri::AppHandle, filename: String) -> R
 
 #[tauri::command]
 fn read_config(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("config.json");
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("config.json");
     if let Ok(content) = std::fs::read_to_string(path) {
         serde_json::from_str(&content).map_err(|e| e.to_string())
     } else {
@@ -528,18 +769,26 @@ fn read_config(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String
 
 #[tauri::command]
 fn write_config(app_handle: tauri::AppHandle, config: serde_json::Value) -> Result<(), String> {
-    let path = app_handle.path().app_data_dir().unwrap_or_default().join("config.json");
+    let path = app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .join("config.json");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap())
-        .map_err(|e| e.to_string())
+    std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn send_notification(app_handle: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+fn send_notification(
+    app_handle: tauri::AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
-    app_handle.notification()
+    app_handle
+        .notification()
         .builder()
         .title(title)
         .body(body)
@@ -570,8 +819,17 @@ fn current_icon_theme() -> String {
             return None;
         }
         let s = String::from_utf8_lossy(&out.stdout);
-        let s = s.trim().trim_matches('\'').trim_matches('"').trim().to_string();
-        if s.is_empty() { None } else { Some(s) }
+        let s = s
+            .trim()
+            .trim_matches('\'')
+            .trim_matches('"')
+            .trim()
+            .to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     };
     try_gsettings("com.deepin.dde.appearance", "icon-theme")
         .or_else(|| try_gsettings("org.gnome.desktop.interface", "icon-theme"))
@@ -606,7 +864,10 @@ fn parse_desktop_entry(path: &std::path::Path, locale_keys: &[String]) -> Option
     let mut icon = String::new();
 
     for line in reader.lines() {
-        let line = match line { Ok(l) => l, Err(_) => break };
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
             if trimmed == "[Desktop Entry]" {
@@ -652,12 +913,16 @@ fn mime_icon_for(path: &std::path::Path) -> String {
         .to_lowercase();
     let by_ext = match ext.as_str() {
         "txt" | "md" | "log" | "csv" | "json" | "xml" | "yaml" | "yml" | "rs" | "c" | "h"
-        | "cpp" | "py" | "js" | "ts" | "sh" | "toml" | "ini" | "conf" | "lua" => Some("text-x-generic"),
+        | "cpp" | "py" | "js" | "ts" | "sh" | "toml" | "ini" | "conf" | "lua" => {
+            Some("text-x-generic")
+        }
         "pdf" => Some("application-pdf"),
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" | "ico" => Some("image-x-generic"),
         "mp4" | "mkv" | "mov" | "avi" | "webm" | "flv" => Some("video-x-generic"),
         "mp3" | "wav" | "flac" | "ogg" | "aac" => Some("audio-x-generic"),
-        "zip" | "tar" | "gz" | "xz" | "bz2" | "7z" | "rar" | "deb" | "rpm" => Some("package-x-generic"),
+        "zip" | "tar" | "gz" | "xz" | "bz2" | "7z" | "rar" | "deb" | "rpm" => {
+            Some("package-x-generic")
+        }
         "doc" | "docx" | "odt" => Some("x-office-document"),
         "xls" | "xlsx" | "ods" => Some("x-office-spreadsheet"),
         "ppt" | "pptx" | "odp" => Some("x-office-presentation"),
@@ -680,7 +945,11 @@ fn mime_icon_for(path: &std::path::Path) -> String {
 
 /// 图片文件 -> data URL（原图内联，由前端 CSS 缩放）。超过 max_bytes 返回 None 走通用图标。
 fn image_data_url_capped(path: &std::path::Path, max_bytes: u64) -> Option<String> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     let mime = match ext.as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -725,7 +994,11 @@ fn resolve_icon(icon: &str, theme: &str) -> Option<String> {
 fn resolve_icon_uncached(icon: &str, theme: &str) -> Option<String> {
     let icon_path = if icon.starts_with('/') {
         let p = std::path::PathBuf::from(icon);
-        if p.exists() { Some(p) } else { None }
+        if p.exists() {
+            Some(p)
+        } else {
+            None
+        }
     } else {
         freedesktop_icons::lookup(icon)
             .with_size(48)
@@ -735,7 +1008,11 @@ fn resolve_icon_uncached(icon: &str, theme: &str) -> Option<String> {
     };
     let p = icon_path?;
     let bytes = std::fs::read(&p).ok()?;
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     let mime = match ext.as_str() {
         "svg" => "image/svg+xml",
         "png" => "image/png",
@@ -759,7 +1036,10 @@ fn list_desktop_entries() -> Result<Vec<DesktopItem>, String> {
     let mut items = Vec::new();
 
     for entry in std::fs::read_dir(&desktop).map_err(|e| e.to_string())? {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         let link_path = entry.path(); // ~/Desktop 里的条目本身（可能是软链）
         let file_name = link_path
             .file_name()
@@ -771,7 +1051,10 @@ fn list_desktop_entries() -> Result<Vec<DesktopItem>, String> {
 
         // 跟随软链判断类型；但文件操作用的 path 仍是 link_path 本身（避免误删系统文件）
         let is_dir = link_path.is_dir();
-        let is_desktop = link_path.extension().map(|e| e == "desktop").unwrap_or(false);
+        let is_desktop = link_path
+            .extension()
+            .map(|e| e == "desktop")
+            .unwrap_or(false);
 
         let (name, kind, icon): (String, &str, Option<String>) = if is_desktop {
             let parsed = parse_desktop_entry(&link_path, &locale_keys);
@@ -816,7 +1099,11 @@ fn list_desktop_entries() -> Result<Vec<DesktopItem>, String> {
 
     // 排序：文件夹 > 应用 > 文件，组内按名称
     items.sort_by(|a, b| {
-        let rank = |k: &str| match k { "dir" => 0, "app" => 1, _ => 2 };
+        let rank = |k: &str| match k {
+            "dir" => 0,
+            "app" => 1,
+            _ => 2,
+        };
         rank(a.kind.as_str())
             .cmp(&rank(b.kind.as_str()))
             .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
@@ -842,7 +1129,10 @@ fn launch_desktop_entry(path: String) -> Result<(), String> {
         // 回退：gtk-launch <app-id>
         if let Some(id) = p.file_stem().map(|s| s.to_string_lossy().to_string()) {
             if !id.is_empty()
-                && std::process::Command::new("gtk-launch").arg(&id).spawn().is_ok()
+                && std::process::Command::new("gtk-launch")
+                    .arg(&id)
+                    .spawn()
+                    .is_ok()
             {
                 return Ok(());
             }
@@ -865,7 +1155,13 @@ fn trash_path(path: String) -> Result<(), String> {
         .args(["trash", path.as_str()])
         .status()
         .map_err(|e| format!("移到回收站失败：{}", e))
-        .and_then(|s| if s.success() { Ok(()) } else { Err("移到回收站失败".to_string()) })
+        .and_then(|s| {
+            if s.success() {
+                Ok(())
+            } else {
+                Err("移到回收站失败".to_string())
+            }
+        })
 }
 
 #[tauri::command]
@@ -930,12 +1226,34 @@ pub fn run() {
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            save_layout, load_layout, widget_read_file, widget_write_file, open_url, open_ssh, fetch_proxy, check_and_cache_video,
-            list_available_widgets, get_top_processes, kill_process, read_config, write_config, check_and_cache_image,
-            list_wallpapers, delete_wallpaper, generate_video_thumbnail, get_image_data_url,
-            save_ai_keys, get_ai_keys, fetch_ai_quota, send_notification,
-            list_desktop_entries, launch_desktop_entry,
-            trash_path, delete_path, reveal_path, copy_text
+            save_layout,
+            load_layout,
+            widget_read_file,
+            widget_write_file,
+            open_url,
+            open_ssh,
+            fetch_proxy,
+            check_and_cache_video,
+            list_available_widgets,
+            get_top_processes,
+            kill_process,
+            read_config,
+            write_config,
+            check_and_cache_image,
+            list_wallpapers,
+            delete_wallpaper,
+            generate_video_thumbnail,
+            get_image_data_url,
+            save_ai_keys,
+            get_ai_keys,
+            fetch_ai_quota,
+            send_notification,
+            list_desktop_entries,
+            launch_desktop_entry,
+            trash_path,
+            delete_path,
+            reveal_path,
+            copy_text
         ])
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -944,7 +1262,11 @@ pub fn run() {
             let url = request.uri().to_string();
             let filename = url.split('/').last().unwrap_or("");
             let app_handle = ctx.app_handle();
-            let wallpapers_dir = app_handle.path().app_data_dir().unwrap_or_default().join("wallpapers");
+            let wallpapers_dir = app_handle
+                .path()
+                .app_data_dir()
+                .unwrap_or_default()
+                .join("wallpapers");
             let file_path = wallpapers_dir.join(filename);
 
             if !file_path.exists() {
@@ -964,7 +1286,12 @@ pub fn run() {
             };
 
             // 解析 Range 请求头（WebKitGTK 播放视频必须支持 Range）
-            let range_header = request.headers().get("Range").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+            let range_header = request
+                .headers()
+                .get("Range")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
 
             if range_header.starts_with("bytes=") {
                 let range_spec = &range_header[6..];
@@ -979,10 +1306,15 @@ pub fn run() {
                 let end = std::cmp::min(end, file_size - 1);
                 let length = end - start + 1;
 
-                use std::io::{Seek, Read};
+                use std::io::{Read, Seek};
                 let mut file = match std::fs::File::open(&file_path) {
                     Ok(f) => f,
-                    Err(_) => return http::Response::builder().status(500).body(Vec::new()).unwrap(),
+                    Err(_) => {
+                        return http::Response::builder()
+                            .status(500)
+                            .body(Vec::new())
+                            .unwrap()
+                    }
                 };
                 let _ = file.seek(std::io::SeekFrom::Start(start));
                 let mut buf = vec![0u8; length as usize];
@@ -992,7 +1324,10 @@ pub fn run() {
                     .status(206)
                     .header("Content-Type", mime)
                     .header("Content-Length", length.to_string())
-                    .header("Content-Range", format!("bytes {}-{}/{}", start, end, file_size))
+                    .header(
+                        "Content-Range",
+                        format!("bytes {}-{}/{}", start, end, file_size),
+                    )
                     .header("Accept-Ranges", "bytes")
                     .header("Access-Control-Allow-Origin", "*")
                     .body(buf)
@@ -1001,22 +1336,18 @@ pub fn run() {
 
             // 非 Range 请求：返回完整文件（但也声明支持 Range）
             match std::fs::read(&file_path) {
-                Ok(bytes) => {
-                    http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", mime)
-                        .header("Content-Length", file_size.to_string())
-                        .header("Accept-Ranges", "bytes")
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(bytes)
-                        .unwrap()
-                }
-                Err(_) => {
-                    http::Response::builder()
-                        .status(500)
-                        .body(Vec::new())
-                        .unwrap()
-                }
+                Ok(bytes) => http::Response::builder()
+                    .status(200)
+                    .header("Content-Type", mime)
+                    .header("Content-Length", file_size.to_string())
+                    .header("Accept-Ranges", "bytes")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(bytes)
+                    .unwrap(),
+                Err(_) => http::Response::builder()
+                    .status(500)
+                    .body(Vec::new())
+                    .unwrap(),
             }
         })
         .setup(|app| {
@@ -1029,7 +1360,7 @@ pub fn run() {
                         let _ = _window.set_size(*size);
                         let _ = _window.set_position(tauri::PhysicalPosition::new(0, 0));
                     }
-                    
+
                     let backend = display::x11::X11Backend;
                     if let Err(e) = backend.mount_to_desktop(&_window) {
                         eprintln!("Failed to mount to desktop: {}", e);
@@ -1047,11 +1378,18 @@ pub fn run() {
                         None => return,
                     };
                     let (tx, rx) = std::sync::mpsc::channel();
-                    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| { let _ = tx.send(res); }) {
+                    let mut watcher = match notify::recommended_watcher(
+                        move |res: notify::Result<notify::Event>| {
+                            let _ = tx.send(res);
+                        },
+                    ) {
                         Ok(w) => w,
                         Err(_) => return,
                     };
-                    if watcher.watch(&desktop, notify::RecursiveMode::NonRecursive).is_err() {
+                    if watcher
+                        .watch(&desktop, notify::RecursiveMode::NonRecursive)
+                        .is_err()
+                    {
                         return;
                     }
                     // rx 循环保活 watcher；每个事件通知前端（前端自己去抖）
@@ -1077,13 +1415,23 @@ pub fn run() {
                 let mut prev_bytes_out: u64 = 0;
                 let mut prev_disk_io: HashMap<String, (u64, u64)> = HashMap::new(); // sectors read, written
                 let mut first_run = true;
+                let mut tick: u64 = 0;
+                let mut cached_cpu_temp = collect_cpu_temp(&components);
+                let mut cached_disk_usage = collect_disk_usage(&disks);
 
                 loop {
+                    tick = tick.wrapping_add(1);
                     sys.refresh_cpu_usage();
                     sys.refresh_memory();
                     networks.refresh(true);
-                    components.refresh(true);
-                    disks.refresh(true);
+                    if tick == 1 || tick % COMPONENT_REFRESH_TICKS == 0 {
+                        components.refresh(true);
+                        cached_cpu_temp = collect_cpu_temp(&components);
+                    }
+                    if tick == 1 || tick % DISK_USAGE_REFRESH_TICKS == 0 {
+                        disks.refresh(true);
+                        cached_disk_usage = collect_disk_usage(&disks);
+                    }
 
                     let cpu_usage = sys.global_cpu_usage();
                     let total_mem = sys.total_memory();
@@ -1103,25 +1451,6 @@ pub fn run() {
                         0.0
                     };
 
-                    // CPU 温度（只取 coretemp/x86_pkg_temp 等 CPU 相关传感器，排除主板杂项传感器）
-                    let cpu_temp = components
-                        .iter()
-                        .filter(|c| {
-                            let label = c.label().to_lowercase();
-                            let name = label.clone();
-                            label.contains("core")
-                                || label.contains("cpu")
-                                || label.contains("package")
-                                || label.contains("tctl")
-                                || label.contains("tccd")
-                                || name.contains("coretemp")
-                                || name.contains("k10temp")
-                                || name.contains("x86_pkg_temp")
-                        })
-                        .filter_map(|c| c.temperature())
-                        .filter(|&t| t > 0.0)
-                        .fold(0.0_f32, f32::max);
-
                     // 计算网络速率（差值）
                     let mut total_in: u64 = 0;
                     let mut total_out: u64 = 0;
@@ -1129,74 +1458,19 @@ pub fn run() {
                         total_in += data.total_received();
                         total_out += data.total_transmitted();
                     }
-                    let net_bytes_in = if first_run { 0 } else { total_in.saturating_sub(prev_bytes_in) };
-                    let net_bytes_out = if first_run { 0 } else { total_out.saturating_sub(prev_bytes_out) };
+                    let net_bytes_in = if first_run {
+                        0
+                    } else {
+                        total_in.saturating_sub(prev_bytes_in) / SYSINFO_INTERVAL_SECS
+                    };
+                    let net_bytes_out = if first_run {
+                        0
+                    } else {
+                        total_out.saturating_sub(prev_bytes_out) / SYSINFO_INTERVAL_SECS
+                    };
                     prev_bytes_in = total_in;
                     prev_bytes_out = total_out;
-                    let mut disk_usage = Vec::new();
-                    for disk in &disks {
-                        let mount_point = disk.mount_point().to_string_lossy().to_string();
-                        // 过滤掉 snap, loop, boot 等非用户数据盘
-                        if mount_point.starts_with("/snap/") || mount_point.starts_with("/run/") || mount_point.starts_with("/sys/") || mount_point.starts_with("/dev/") || mount_point.starts_with("/boot") || disk.is_removable() {
-                            continue;
-                        }
-                        
-                        let mut total_space = disk.total_space();
-                        let mut available_space = disk.available_space();
-                        let mut used_space = total_space.saturating_sub(available_space);
-                        
-                        // 使用 libc::statvfs 获取最精确的文件系统块数据（排除 Linux ext4 预留给 root 的 5% 空间的影响）
-                        let c_mount_point = std::ffi::CString::new(mount_point.clone()).unwrap_or_default();
-                        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-                        if unsafe { libc::statvfs(c_mount_point.as_ptr(), &mut stat) } == 0 {
-                            total_space = (stat.f_blocks as u64) * (stat.f_frsize as u64);
-                            let free_space = (stat.f_bfree as u64) * (stat.f_frsize as u64);
-                            available_space = (stat.f_bavail as u64) * (stat.f_frsize as u64);
-                            used_space = total_space.saturating_sub(free_space);
-                        }
-
-                        disk_usage.push(DiskUsagePayload {
-                            name: disk.name().to_string_lossy().to_string(),
-                            mount_point,
-                            total_space,
-                            available_space,
-                            used_space,
-                        });
-                    }
-
-                    let mut disk_io = Vec::new();
-                    if let Ok(file) = File::open("/proc/diskstats") {
-                        let reader = BufReader::new(file);
-                        for line in reader.lines() {
-                            if let Ok(line) = line {
-                                let parts: Vec<&str> = line.split_whitespace().collect();
-                                if parts.len() >= 14 {
-                                    let name = parts[2].to_string();
-                                    // 仅统计物理设备如 nvme, sd 等，忽略 loop 和 ram
-                                    if name.starts_with("loop") || name.starts_with("ram") || name.starts_with("sr") {
-                                        continue;
-                                    }
-                                    if let (Ok(sectors_read), Ok(sectors_written)) = (parts[5].parse::<u64>(), parts[9].parse::<u64>()) {
-                                        let prev = prev_disk_io.entry(name.clone()).or_insert((sectors_read, sectors_written));
-                                        
-                                        let read_bytes = if first_run { 0 } else { sectors_read.saturating_sub(prev.0) * 512 };
-                                        let write_bytes = if first_run { 0 } else { sectors_written.saturating_sub(prev.1) * 512 };
-                                        
-                                        *prev = (sectors_read, sectors_written);
-
-                                        // 过滤掉子分区 (如 nvme0n1p1), 只记录主磁盘设备的 IO 以防止重复计算
-                                        if !name.chars().last().unwrap_or('a').is_digit(10) || name.contains("nvme") && !name.contains("p") {
-                                            disk_io.push(DiskIoPayload {
-                                                name: name.clone(),
-                                                read_bytes_per_sec: read_bytes / 2, // 2秒的间隔
-                                                write_bytes_per_sec: write_bytes / 2,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    let disk_io = collect_disk_io(&mut prev_disk_io, first_run);
 
                     first_run = false;
 
@@ -1204,16 +1478,16 @@ pub fn run() {
                         cpu_usage,
                         mem_usage,
                         swap_usage,
-                        cpu_temp,
+                        cpu_temp: cached_cpu_temp,
                         net_bytes_in,
                         net_bytes_out,
-                        disks: disk_usage,
+                        disks: cached_disk_usage.clone(),
                         disk_io,
                     };
 
                     // 广播给前端（2秒间隔，避免频繁 emit 导致 UI 卡顿）
                     let _ = app_handle.emit("sysinfo_update", payload);
-                    std::thread::sleep(Duration::from_secs(2));
+                    std::thread::sleep(Duration::from_secs(SYSINFO_INTERVAL_SECS));
                 }
             });
 

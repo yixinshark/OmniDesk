@@ -223,15 +223,77 @@
     }
 
     const ioHistories = {}; // { "sda": { read: [], write: [] } }
+    const textCache = {};
+    let renderedDiskCount = -1;
+
+    function setText(id, value) {
+      if (textCache[id] === value) return;
+      textCache[id] = value;
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function setHTML(id, value) {
+      if (textCache[id] === value) return;
+      textCache[id] = value;
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = value;
+    }
+
+    function ensureDiskCards(count) {
+      if (renderedDiskCount === count) return;
+      renderedDiskCount = count;
+      const container = document.getElementById('disk-container');
+      Object.keys(textCache).forEach((key) => delete textCache[key]);
+      container.innerHTML = '';
+
+      if (count === 0) {
+        container.innerHTML = '<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:12px; color:rgba(255,255,255,0.5);">No disk info</div>';
+        return;
+      }
+
+      for (let idx = 0; idx < count; idx++) {
+        const card = document.createElement('div');
+        card.className = 'disk-card';
+        card.id = `disk-card-${idx}`;
+        card.innerHTML = `
+          <div class="gauge-container">
+            <svg viewBox="0 0 100 100" class="gauge">
+              <circle class="bg" cx="50" cy="50" r="44" stroke-dasharray="207, 276" stroke-dashoffset="0"/>
+              <circle class="fill" cx="50" cy="50" r="44" id="disk-fill-${idx}"/>
+            </svg>
+            <div class="gauge-info">
+              <span class="gauge-val" id="disk-pct-${idx}">--%</span>
+              <span class="gauge-label">USED</span>
+            </div>
+          </div>
+          <div class="disk-name" id="disk-name-${idx}"></div>
+          <div class="disk-details" id="disk-details-${idx}"></div>
+          <div class="io-section">
+            <div class="io-title">DISK I/O</div>
+            <div class="io-text">
+              <span class="io-read" id="io-read-${idx}">R: 0 B/s</span>
+              <span class="io-write" id="io-write-${idx}">W: 0 B/s</span>
+            </div>
+            <div class="sparkline">
+              <svg viewBox="0 0 100 24" preserveAspectRatio="none">
+                <polyline class="sparkline-read" id="spark-read-${idx}" points="0,24 100,24"></polyline>
+                <polyline class="sparkline-write" id="spark-write-${idx}" points="0,24 100,24"></polyline>
+              </svg>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      }
+    }
 
     window.__widgetBridge.on('sysinfo_update', (data) => {
       if (!data || !data.disks) return;
 
-      const container = document.getElementById('disk-container');
-      
       // We limit to max 2 disks visually for 6x4 size to keep it clean, 
       // preferring / and /home or the first two physical drives
       const displayDisks = data.disks.slice(0, 2);
+      ensureDiskCards(displayDisks.length);
       
       // Update historical IO
       if (data.disk_io) {
@@ -246,22 +308,7 @@
         });
       }
 
-      if (displayDisks.length > 0 && container.innerHTML.includes('Loading')) {
-        container.innerHTML = '';
-        
-        // Create templates for disks
-        displayDisks.forEach((disk, idx) => {
-          const card = document.createElement('div');
-          card.className = 'disk-card';
-          card.id = `disk-card-${idx}`;
-          container.appendChild(card);
-        });
-      }
-
       displayDisks.forEach((disk, idx) => {
-        const card = document.getElementById(`disk-card-${idx}`);
-        if (!card) return;
-
         const used = disk.used_space !== undefined ? disk.used_space : (disk.total_space - disk.available_space);
         const pct = disk.total_space > 0 ? (used / disk.total_space) * 100 : 0;
         const offset = ARC_LENGTH - (pct / 100) * ARC_LENGTH;
@@ -300,41 +347,25 @@
           dName = parts.length > 0 ? '/' + parts[parts.length - 1].toUpperCase() : dName;
         }
 
-        card.innerHTML = `
-          <div class="gauge-container">
-            <svg viewBox="0 0 100 100" class="gauge">
-              <!-- Background Arc -->
-              <circle class="bg" cx="50" cy="50" r="44" stroke-dasharray="207, 276" stroke-dashoffset="0"/>
-              <!-- Fill Arc -->
-              <circle class="fill" cx="50" cy="50" r="44" style="stroke: url(#${getGradientId(pct)}); stroke-dashoffset: ${offset};"/>
-            </svg>
-            <div class="gauge-info">
-              <span class="gauge-val">${Math.round(pct)}%</span>
-              <span class="gauge-label">USED</span>
-            </div>
-          </div>
-          
-          <div class="disk-name" title="${disk.mount_point}">${dName}</div>
-          <div class="disk-details">
-            Used: ${fmtBytes(used, 0)} / ${fmtBytes(disk.total_space, 0)}
-            <span style="margin: 0 4px; opacity: 0.3;">|</span>
-            <span style="color: #4ade80; font-weight: 600;">Free: ${fmtBytes(disk.available_space, 0)}</span>
-          </div>
-          
-          <div class="io-section">
-            <div class="io-title">DISK I/O</div>
-            <div class="io-text">
-              <span class="io-read">R: ${fmtBytes(ioRead)}/s</span>
-              <span class="io-write">W: ${fmtBytes(ioWrite)}/s</span>
-            </div>
-            <div class="sparkline">
-              <svg viewBox="0 0 100 24" preserveAspectRatio="none">
-                <polyline class="sparkline-read" points="${rPoints || '0,24 100,24'}"></polyline>
-                <polyline class="sparkline-write" points="${wPoints || '0,24 100,24'}"></polyline>
-              </svg>
-            </div>
-          </div>
-        `;
+        const fill = document.getElementById(`disk-fill-${idx}`);
+        if (fill) {
+          fill.setAttribute('stroke', `url(#${getGradientId(pct)})`);
+          fill.style.strokeDashoffset = String(offset);
+        }
+        const nameEl = document.getElementById(`disk-name-${idx}`);
+        if (nameEl) nameEl.setAttribute('title', disk.mount_point);
+        setText(`disk-pct-${idx}`, `${Math.round(pct)}%`);
+        setText(`disk-name-${idx}`, dName);
+        setHTML(
+          `disk-details-${idx}`,
+          `Used: ${fmtBytes(used, 0)} / ${fmtBytes(disk.total_space, 0)}
+          <span style="margin: 0 4px; opacity: 0.3;">|</span>
+          <span style="color: #4ade80; font-weight: 600;">Free: ${fmtBytes(disk.available_space, 0)}</span>`
+        );
+        setText(`io-read-${idx}`, `R: ${fmtBytes(ioRead)}/s`);
+        setText(`io-write-${idx}`, `W: ${fmtBytes(ioWrite)}/s`);
+        document.getElementById(`spark-read-${idx}`)?.setAttribute('points', rPoints || '0,24 100,24');
+        document.getElementById(`spark-write-${idx}`)?.setAttribute('points', wPoints || '0,24 100,24');
       });
     });
   </script>

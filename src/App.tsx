@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import "./index.css";
 import GridEngine, { WidgetLayout } from "./components/GridEngine";
 import WidgetDrawer from "./components/WidgetDrawer";
@@ -13,9 +13,11 @@ interface AppConfig {
   lastFetchDate?: string;    // last fetch date (YYYYMMDD)
 }
 
+const MAX_GLASS_INTENSITY = 24;
+
 const DEFAULT_CONFIG: AppConfig = {
-  wallpaperType: 'video', // 改为默认 video，提升体验
-  glassIntensity: 30,
+  wallpaperType: 'static',
+  glassIntensity: 18,
   dailyAutoFetch: true,
 };
 
@@ -42,6 +44,13 @@ const DEFAULT_WIDGETS: WidgetLayout[] = [
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function sanitizeConfig(config: AppConfig): AppConfig {
+  return {
+    ...config,
+    glassIntensity: Math.max(0, Math.min(MAX_GLASS_INTENSITY, Number(config.glassIntensity) || 0)),
+  };
 }
 
 function App() {
@@ -72,8 +81,11 @@ function App() {
 
     invoke<AppConfig>('read_config')
       .then(saved => {
-        const merged = { ...DEFAULT_CONFIG, ...saved };
+        const merged = sanitizeConfig({ ...DEFAULT_CONFIG, ...saved });
         setConfig(merged);
+        if (JSON.stringify(merged) !== JSON.stringify({ ...DEFAULT_CONFIG, ...saved })) {
+          invoke('write_config', { config: merged }).catch(() => {});
+        }
         // 加载已保存的壁纸
         loadSavedWallpaper(merged);
       })
@@ -202,18 +214,19 @@ function App() {
   }, [config.dailyAutoFetch, config.wallpaperType, config.lastFetchDate, fetchNewWallpaper]);
 
   const handleConfigChange = useCallback((newConfig: AppConfig) => {
-    const isWallpaperTypeChanged = config.wallpaperType !== newConfig.wallpaperType;
-    setConfig(newConfig);
-    invoke('write_config', { config: newConfig }).catch(err => console.error("保存配置失败:", err));
+    const sanitizedConfig = sanitizeConfig(newConfig);
+    const isWallpaperTypeChanged = config.wallpaperType !== sanitizedConfig.wallpaperType;
+    setConfig(sanitizedConfig);
+    invoke('write_config', { config: sanitizedConfig }).catch(err => console.error("保存配置失败:", err));
 
     if (isWallpaperTypeChanged) {
-      if (newConfig.wallpaperType === 'video') {
+      if (sanitizedConfig.wallpaperType === 'video') {
         setBgUrl('');
         setVideoUrl(''); // 在线播放无需 fallback
       } else {
         setVideoUrl('');
       }
-      fetchNewWallpaper(newConfig.wallpaperType, newConfig);
+      fetchNewWallpaper(sanitizedConfig.wallpaperType, sanitizedConfig);
     }
   }, [config, fetchNewWallpaper]);
 
@@ -250,7 +263,7 @@ function App() {
 
   // 毛玻璃强度
   useEffect(() => {
-    document.documentElement.style.setProperty('--glass-blur', `${config.glassIntensity}px`);
+    document.documentElement.style.setProperty('--glass-blur', `${sanitizeConfig(config).glassIntensity}px`);
   }, [config.glassIntensity]);
 
   return (
@@ -265,12 +278,13 @@ function App() {
           key={videoUrl}
           src={videoUrl}
           autoPlay muted
+          playsInline
+          preload="metadata"
           onEnded={() => fetchNewWallpaper('video')}
           onError={(e) => {
             console.error("Video playback error, fetching next...", e);
             fetchNewWallpaper('video');
           }}
-          style={{ willChange: 'transform' }}
           className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none"
         />
       )}

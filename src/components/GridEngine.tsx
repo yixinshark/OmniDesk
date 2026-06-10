@@ -27,7 +27,8 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
   const [gridConfig, setGridConfig] = useState({
     columns: DEFAULT_COLUMNS,
     rows: DEFAULT_ROWS,
-    cellSize: 80,
+    cellWidth: 80,
+    cellHeight: 80,
     gap: DEFAULT_GAP,
     offsetX: 0,
     offsetY: 0
@@ -186,7 +187,7 @@ export default function GridEngine({ widgets, isEditMode, onWidgetChange, onDele
           <div
             key={widget.instanceId}
             // 只有非拖拽状态才加 transition，拖拽时必须跟手（无延迟）
-            className={`absolute glass rounded-2xl overflow-hidden ${isDragging ? 'z-50 shadow-2xl scale-[1.02]' : 'transition-all duration-300 z-10'}`}
+            className={`absolute glass rounded-2xl overflow-hidden ${isDragging ? 'z-50 shadow-2xl scale-[1.02]' : 'transition-[left,top,width,height,transform] duration-300 z-10'}`}
             style={{
               left: `${left}px`,
               top: `${top}px`,

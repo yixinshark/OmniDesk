@@ -30,6 +30,8 @@ interface SettingsPageProps {
 
 type TabKey = 'appearance' | 'layout' | 'about';
 
+const MAX_GLASS_INTENSITY = 24;
+
 const TABS: { key: TabKey; icon: string; label: string }[] = [
   { key: 'appearance', icon: '🎨', label: '外观' },
   { key: 'layout', icon: '📐', label: '布局' },
@@ -46,20 +48,13 @@ export default function SettingsPage({ isOpen, onClose, widgets, onWidgetChange,
     try {
       const list = await invoke<WallpaperInfo[]>('list_wallpapers');
       setWallpapers(list);
-      // Load preview images for all wallpapers
+      // 动态壁纸历史当前不展示，避免打开设置时无意义读取缩略图。
       const urls: Record<string, string> = {};
       for (const wp of list) {
+        if (wp.wtype !== 'static') continue;
         try {
-          if (wp.wtype === 'video') {
-            const thumbPath = await invoke<string | null>('generate_video_thumbnail', { filename: wp.filename });
-            if (thumbPath) {
-              const dataUrl = await invoke<string | null>('get_image_data_url', { path: thumbPath });
-              if (dataUrl) urls[wp.filename] = dataUrl;
-            }
-          } else {
-            const dataUrl = await invoke<string | null>('get_image_data_url', { path: wp.path });
-            if (dataUrl) urls[wp.filename] = dataUrl;
-          }
+          const dataUrl = await invoke<string | null>('get_image_data_url', { path: wp.path });
+          if (dataUrl) urls[wp.filename] = dataUrl;
         } catch {}
       }
       setThumbUrls(urls);
@@ -97,7 +92,6 @@ export default function SettingsPage({ isOpen, onClose, widgets, onWidgetChange,
   };
 
   const staticWallpapers = wallpapers.filter(w => w.wtype === 'static');
-  const videoWallpapers = wallpapers.filter(w => w.wtype === 'video');
 
   return (
     <>
@@ -256,7 +250,7 @@ export default function SettingsPage({ isOpen, onClose, widgets, onWidgetChange,
                 <input
                   type="range"
                   min="0"
-                  max="60"
+                  max={MAX_GLASS_INTENSITY}
                   step="2"
                   value={config.glassIntensity}
                   onChange={(e) => onConfigChange({ ...config, glassIntensity: Number(e.target.value) })}

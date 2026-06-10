@@ -122,7 +122,7 @@
 
     <div class="input-group row" id="auto-config-row" style="display: none;">
       <label>间隔(分钟)</label>
-      <input type="number" id="input-interval" min="1" value="1" />
+      <input type="number" id="input-interval" min="15" value="15" />
     </div>
     
     <button class="btn-save" id="btn-save">保存</button>
@@ -138,11 +138,12 @@
     const inputInterval = document.getElementById('input-interval');
     const autoConfigRow = document.getElementById('auto-config-row');
     const btnRefresh = document.getElementById('btn-refresh');
+    const MIN_AUTO_INTERVAL_MINUTES = 15;
     
     let isSettingsOpen = false;
     let timerId = null;
 
-    let config = JSON.parse(localStorage.getItem('aiQuotaConfig') || '{"mode":"auto","interval":1}');
+    let config = JSON.parse(localStorage.getItem('aiQuotaConfig') || '{"mode":"auto","interval":15}');
 
     function getSelectedMode() {
       for (const r of radioModes) if (r.checked) return r.value;
@@ -150,6 +151,7 @@
     }
 
     function applyConfigUI() {
+      config.interval = Math.max(MIN_AUTO_INTERVAL_MINUTES, parseInt(config.interval) || MIN_AUTO_INTERVAL_MINUTES);
       for (const r of radioModes) {
         if (r.value === config.mode) r.checked = true;
       }
@@ -188,13 +190,15 @@
     function setupTimer() {
       if (timerId) clearInterval(timerId);
       if (config.mode === 'auto') {
-        const ms = Math.max(1, parseInt(config.interval) || 1) * 60 * 1000;
+        config.interval = Math.max(MIN_AUTO_INTERVAL_MINUTES, parseInt(config.interval) || MIN_AUTO_INTERVAL_MINUTES);
+        inputInterval.value = config.interval;
+        const ms = config.interval * 60 * 1000;
         timerId = setInterval(fetchQuota, ms);
       }
     }
 
     async function fetchQuota() {
-      if (isSettingsOpen) return;
+      if (isSettingsOpen || document.hidden) return;
       document.getElementById('status-text').innerText = 'Syncing...';
       btnRefresh.classList.add('refreshing');
       
@@ -240,7 +244,7 @@
       btn.innerText = '保存中...';
       
       config.mode = getSelectedMode();
-      config.interval = parseInt(inputInterval.value) || 1;
+      config.interval = Math.max(MIN_AUTO_INTERVAL_MINUTES, parseInt(inputInterval.value) || MIN_AUTO_INTERVAL_MINUTES);
       localStorage.setItem('aiQuotaConfig', JSON.stringify(config));
       
       setupTimer();
@@ -265,6 +269,9 @@
     });
 
     setTimeout(loadKeysAndInit, 500);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && config.mode === 'auto' && !isSettingsOpen) fetchQuota();
+    });
   </script>
 </body>
 </html>
