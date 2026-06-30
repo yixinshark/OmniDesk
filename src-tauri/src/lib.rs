@@ -494,12 +494,18 @@ async fn check_and_cache_video(
 }
 
 #[tauri::command]
-fn list_available_widgets(_app_handle: tauri::AppHandle) -> Result<Vec<WidgetManifest>, String> {
-    // Try multiple possible widget directories
-    let mut widget_dirs = vec![
-        std::path::PathBuf::from("public/widgets"),
-        std::path::PathBuf::from("../public/widgets"),
-    ];
+fn list_available_widgets(app_handle: tauri::AppHandle) -> Result<Vec<WidgetManifest>, String> {
+    let mut widget_dirs = vec![];
+
+    // 生产环境：Tauri resource 目录（deb 安装后由 resource_dir() 解析）。
+    // tauri.conf.json 的 bundle.resources 把 public/widgets 打包到 widgets/ 下。
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        widget_dirs.push(resource_dir.join("widgets"));
+    }
+
+    // dev 回退：tauri dev 的 CWD 为项目根，public/widgets 直接命中。
+    widget_dirs.push(std::path::PathBuf::from("public/widgets"));
+    widget_dirs.push(std::path::PathBuf::from("../public/widgets"));
     // Also check relative to the exe
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
